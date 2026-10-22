@@ -2,7 +2,7 @@
 
 A Chrome side panel that shows a beginner what to click next, one tiny step at a time, in very simple words. You type what you want to do ("a website for my shop", "a poster in Canva", "a budget in Google Sheets"), press **Go**, and an orange arrow points at the button to press. **It only points. It never clicks or types for you.**
 
-It works on any normal website. It has written guides for three jobs so far: making an app and putting it online (Lovable, GitHub, Vercel), making a design in Canva, and using Google Sheets. For anything else it still helps from what it sees, and says "I'm not 100% sure".
+It works on any normal website. It has written guides for four jobs so far: making an app and putting it online (Lovable, GitHub, Vercel), making a design in Canva, using Google Sheets, and building an automation (Zapier or Make). For anything else it still helps from what it sees, and says "I'm not 100% sure". It can't see desktop apps; for those it points you to the website version.
 
 Two parts:
 - `extension/` the Chrome extension (side panel + arrow)
@@ -39,7 +39,7 @@ Gemini (Google) is the default; Claude (Anthropic) also works.
 ## How it works
 
 - The panel reads the page you are on (buttons, links and fields as plain text) and sends the AI only the **website name**, the page title, that list, your goal and your last three instructions.
-- The AI picks one element by number. Our own code draws the arrow on it. The AI cannot send you to a random website: it can only pick from the fixed list in `web/lib/sites.ts` (Lovable, v0, Bolt, GitHub, Vercel, Canva, Google Sheets).
+- The AI picks one element by number. Our own code draws the arrow on it. The AI cannot send you to a random website: it can only pick from the fixed list in `web/lib/sites.ts` (Lovable, v0, Bolt, GitHub, Vercel, Canva, Google Sheets, Docs, Gmail, Drive, Zapier, Make, Claude, ChatGPT, Gemini, Notion, Figma).
 - When the page changes, the panel looks again by itself. **I'm lost** asks again with a gentler explanation. **🔊 Read it to me** speaks the next step with Chrome's own voice.
 - What the AI knows about each tool lives in short files in `web/lib/guides/`.
 

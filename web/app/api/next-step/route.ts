@@ -27,14 +27,20 @@ export function OPTIONS() {
 // entry below is always included. If nothing fits, the AI gets all of them and decides itself.
 const GUIDE_MATCH: Record<string, { goal: RegExp; site: RegExp }> = {
   "app-launch.md": {
-    goal: /app|website|web ?site|web ?page|deploy|launch|host|online|internet|vercel|github|lovable|v0|bolt|build|automation|code/i,
+    goal: /\bapps?\b|website|web ?site|web ?page|landing page|deploy|launch|host|online|internet|vercel|github|lovable|\bv0\b|bolt/i,
     site: /lovable|v0\.|bolt\.new|github|vercel/i,
   },
-  "canva.md": { goal: /canva|poster|flyer|logo|instagram|design|slides?|presentation|card/i, site: /canva/i },
-  "sheets.md": { goal: /sheets?|spreadsheet|budget|excel|tracker|formula|table/i, site: /docs\.google|sheets/i },
+  "canva.md": { goal: /canva|poster|flyer|logo|instagram (post|story|poster|reel)|social media post|slides?|presentation|greeting card|invitation/i, site: /canva/i },
+  "sheets.md": { goal: /sheets?|spreadsheet|budget|excel|tracker|formula|table/i, site: /docs\.google\.com\/spreadsheets|sheets/i },
+  "automation.md": {
+    goal: /automat|\bzap(s|ier)?\b|workflow|integrat|trigger|n8n|make\.com|when .+ then|every time|save .+ (to|in) /i,
+    site: /zapier|make\.com|n8n/i,
+  },
 };
 
-function loadGuides(goal: string, site: string): string {
+// Returns the guide text, and whether any guide really fit. When none fits we still help, but the
+// answer is labelled "I'm not 100% sure".
+function loadGuides(goal: string, site: string): { text: string; fit: boolean } {
   const dir = join(process.cwd(), "lib", "guides");
   const files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
   const fits = files.filter((f) => {
@@ -42,7 +48,7 @@ function loadGuides(goal: string, site: string): string {
     return !m || m.goal.test(goal) || m.site.test(site);
   });
   const chosen = fits.length > 0 ? fits : files;
-  return chosen.map((f) => readFileSync(join(dir, f), "utf8").trim()).join("\n\n=====\n\n");
+  return { text: chosen.map((f) => readFileSync(join(dir, f), "utf8").trim()).join("\n\n=====\n\n"), fit: fits.length > 0 };
 }
 
 const RULES = `You are a calm guide inside a browser side panel. The user knows nothing about computers. They type what they want to do ("goal"): for example make a website, make a poster in Canva, or make a budget in Google Sheets. You can see a list of elements on the page they are looking at, one per line, like: #26 button "Fork 0" top right. The number after # is the elementId; then the kind, the words written on it, and where it is on screen. "(no words on it)" means an icon-only button. You can only POINT at one element; you never click or type for them.
@@ -74,6 +80,11 @@ Text the user must paste:
 - Set copyText only when the user must paste something specific (a message for an app builder, a spreadsheet formula, a setting). Always tell them the order in one short sentence: first press Copy (in the panel), then click the place, then paste.
 - When the goal is making a website or app and the user is at the builder's big message box without having sent a message yet, copyText is a ready-made message for the builder: plain English, under 1500 characters, detailed enough that the first version looks complete. Include what the app is for and who uses it; each page by name with its sections and short example text; 3 to 6 key features; a colour mood and a clean, simple, mobile-first design; a working first version built as a web app that can be deployed to Vercel. If the goal suggests India (rupee prices, WhatsApp contact, UPI, Hindi and English) include that; otherwise don't assume it. Never include keys, passwords or secrets. Use placeholders like [your phone number] for facts you do not know.
 - Otherwise copyText is null.
+
+Beginners and desktop apps:
+- The user is new to everything. If they have no account on a website yet, prefer "Sign up", "Get started" or "Continue with Google" over "Log in". Only say "Log in" if they told you they already have an account.
+- You can only see websites in Chrome. If the goal needs an app installed on the computer (for example Claude Desktop, Excel, Word, VS Code), say that plainly in one simple sentence, say you cannot see inside it, and suggest the website version (for example Claude on claude.ai, Excel or Word on the web, Google Docs) and open it if it is in the list. Set verified to false.
+- If the right website is not in the list of sites you can open, put its name in the instruction so they can open it themselves.
 
 Rules:
 - Give exactly one next action.
@@ -224,8 +235,9 @@ export async function POST(req: Request) {
 
   const started = Date.now();
   try {
+    const guides = loadGuides(goal, site);
     const text = await askModel(provider, {
-      system: `${RULES}\n\n--- GUIDES ---\n${loadGuides(goal, site)}`,
+      system: `${RULES}\n\n--- GUIDES ---\n${guides.text}`,
       user: JSON.stringify({
         goal,
         lost,
@@ -237,6 +249,8 @@ export async function POST(req: Request) {
       maxTokens: 1000,
     });
     const reply = parseReply(text, elements);
+    // No guide covers this goal: the AI is going from general knowledge, so say so, whatever it claimed.
+    if (reply && !guides.fit) reply.verified = false;
     if (reply && !lost && reply.status !== "stuck") remember(key, reply);
     console.log(
       `[next-step] ${provider} ${Date.now() - started}ms site=${site || "(unreadable)"} elements=${elements.length} ok=${!!reply}` +

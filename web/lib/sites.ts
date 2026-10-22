@@ -1,7 +1,7 @@
 // The only websites the guide can send you to. The AI picks a name from this list;
 // the web address always comes from here, never from the AI.
-// To let it open a new tool: add one line here, add its name to the "open" list in
-// app/api/next-step/route.ts, and write a short guide in lib/guides/.
+// To let it open a new tool: add one line here (the "open" list in the AI's rules is built from
+// this file automatically), and optionally write a short guide in lib/guides/.
 
 export const SITES = {
   lovable: { label: "Lovable", url: "https://lovable.dev" },
@@ -11,6 +11,16 @@ export const SITES = {
   vercel: { label: "Vercel", url: "https://vercel.com" },
   canva: { label: "Canva", url: "https://www.canva.com" },
   sheets: { label: "Google Sheets", url: "https://docs.google.com/spreadsheets/" },
+  docs: { label: "Google Docs", url: "https://docs.google.com/document/" },
+  gmail: { label: "Gmail", url: "https://mail.google.com" },
+  drive: { label: "Google Drive", url: "https://drive.google.com" },
+  zapier: { label: "Zapier", url: "https://zapier.com" },
+  make: { label: "Make", url: "https://www.make.com" },
+  claude: { label: "Claude", url: "https://claude.ai" },
+  chatgpt: { label: "ChatGPT", url: "https://chatgpt.com" },
+  gemini: { label: "Gemini", url: "https://gemini.google.com" },
+  notion: { label: "Notion", url: "https://www.notion.so" },
+  figma: { label: "Figma", url: "https://www.figma.com" },
 } as const;
 
 export type SiteKey = keyof typeof SITES;
