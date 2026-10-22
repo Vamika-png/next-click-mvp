@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Next Click</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <h1>Next Click</h1>
+
+  <!-- 1. Say what you want -->
+  <section id="ask">
+    <label for="goal">What do you want to do?</label>
+    <textarea id="goal" rows="2" placeholder="Example: a website for my shop, a poster in Canva, a budget in Google Sheets"></textarea>
+    <button id="go" class="big primary">Go</button>
+  </section>
+
+  <p id="goalLine" class="goal-line" hidden>Your goal: <strong id="goalText"></strong> <button id="change" class="link">Change</button></p>
+
+  <!-- 2. The one thing to do right now -->
+  <section id="now" class="now" hidden>
+    <p id="nowText" class="now-text"></p>
+    <p id="nowNote" class="now-note" hidden></p>
+    <button id="nowPrimary" class="big primary" hidden></button>
+    <div id="copyBox" class="copybox" hidden>
+      <p class="copy-hint">Press Copy. Then paste it where I tell you.</p>
+      <pre id="copyText"></pre>
+      <button id="copyBtn" class="secondary">Copy</button>
+    </div>
+    <div class="now-links">
+      <button id="hear" class="link" hidden>🔊 Read it to me</button>
+      <button id="lost" class="link">I'm lost</button>
+    </div>
+  </section>
+
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <script src="config.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

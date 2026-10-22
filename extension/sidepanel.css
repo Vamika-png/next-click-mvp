@@ -1,0 +1,30 @@
+:root { --accent: #ff5a1f; --ink: #1c1c1e; --muted: #5f6368; --line: #e2e2e5; --warn: #b3500f; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: #fff; }
+h1 { font-size: 18px; margin: 0 0 12px; color: var(--accent); }
+label { display: block; font-size: 22px; font-weight: 700; line-height: 1.25; margin-bottom: 8px; }
+textarea { width: 100%; padding: 12px; font: inherit; border: 2px solid var(--line); border-radius: 10px; resize: vertical; }
+textarea:focus { outline: none; border-color: var(--accent); }
+
+button { font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 10px; border: 2px solid var(--line); background: #f4f4f6; cursor: pointer; }
+button.big { display: block; width: 100%; font-size: 18px; padding: 14px; margin-top: 12px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.link { background: none; border: none; color: var(--muted); text-decoration: underline; padding: 8px 2px; font-weight: 500; font-size: 14px; }
+button:disabled { opacity: .55; cursor: default; }
+
+.goal-line { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
+.goal-line strong { color: var(--ink); }
+
+.now { border: 3px solid var(--accent); border-radius: 16px; padding: 16px; }
+.now.problem { border-color: #f0b27a; background: #fff8f1; }
+.now-text { font-size: 21px; line-height: 1.35; font-weight: 700; margin: 0; }
+.now-note { margin: 10px 0 0; color: var(--muted); font-size: 15px; }
+.now-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+
+.copybox { margin-top: 12px; border-top: 2px dashed var(--line); padding-top: 12px; }
+.copy-hint { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
+pre { white-space: pre-wrap; word-break: break-word; background: #f4f4f6; padding: 10px; border-radius: 8px; margin: 0 0 8px; font: 13px/1.4 ui-monospace, Consolas, monospace; max-height: 220px; overflow: auto; }
+
+.status { min-height: 22px; margin: 10px 0 0; font-size: 14px; color: var(--muted); }
+.status.problem { color: var(--warn); font-weight: 600; }
+[hidden] { display: none !important; }
