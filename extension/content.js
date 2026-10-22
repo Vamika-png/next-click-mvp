@@ -193,6 +193,7 @@
   }
 
   function onUserAction() {
+    clear(); // take the old arrow away at once, so it never points at something that is gone
     notify("user-acted");
   }
 

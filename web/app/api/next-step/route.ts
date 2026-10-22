@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { sanitizeElements, sanitizeText, type PageElement } from "@/lib/sanitize";
@@ -38,15 +39,15 @@ Help with ANY goal. Below you are given short written guides for some tools. If 
 Work out where they are from the page (site, title, elements) and your previous instructions. If the goal is only part of a longer job, do only that part.
 
 Answer with ONE JSON object and nothing else:
-{"status":"continue"|"done"|"stuck","instruction":"<one or two very simple sentences>","note":"<one short reassuring line, or null>","elementId":<number from the list or null>,"copyText":"<text to paste or null>","open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false}
+{"status":"continue"|"done"|"stuck","instruction":"<MAX 15 words: the action and where it is>","note":"<MAX 20 words: why, or what will happen next, or null>","elementId":<number from the list or null>,"copyText":"<text to paste or null>","open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false}
 
 How to talk (most important):
 - Imagine the user is a 3-year-old who knows nothing about computers. Use the shortest, simplest words. Be warm and calm.
-- ONE tiny action per message, written as a command: "Press the orange button that says 'Sign up'."
+- ONE tiny action per message, written as a short command with where it is, at most 15 words. Good: "Press 'Add New', at the top in the middle." Bad (too long): "Press the button that says 'Add New' near the top in the middle of the screen to start putting your project on the internet." The reason or what happens next goes in "note", never in "instruction".
 - Say exactly what to look for: quote the words written on it, and say where it is using the element's "where" (for example "at the top right" or "in the middle at the bottom"). Prefer elements that are on screen.
 - If lost is true, say in one simple sentence what is on the screen, tell them it is okay, then give one tiny next action.
 - Never use these words: repository, repo, deploy, prompt, API, environment, framework, commit, authenticate, OAuth, build log, terminal. Use simple words instead ("saving place", "put it on the internet", "message for the robot"). If a hard word is unavoidable, explain it in a few words in brackets.
-- "note" is optional and short, for example "A new page may open. That is normal."
+- "note" is optional and short, for example "This starts your project. A new page may open, and that is normal."
 - When the user meets a new part of an app for the first time (a menu, a tab, a setting), say in the note, in a few words, what it is for. This is how they learn to use the app.
 
 Opening websites:
@@ -110,6 +111,22 @@ function mockReply(goal: string, elements: PageElement[], site: string): Reply {
     open: null,
     verified: false,
   };
+}
+
+// Remember recent answers. The same goal on the same page with the same buttons gets the same
+// answer, so repeats (a retry, a second demo run) come back instantly and use no AI quota.
+// Kept only in the server's memory for 10 minutes; "I'm lost" always asks again.
+const CACHE_MS = 10 * 60 * 1000;
+const CACHE_MAX = 200;
+const answers = new Map<string, { at: number; reply: Reply }>();
+
+function cacheKey(parts: string[]): string {
+  return createHash("sha1").update(parts.join("\u0001")).digest("hex");
+}
+
+function remember(key: string, reply: Reply) {
+  if (answers.size >= CACHE_MAX) answers.delete(answers.keys().next().value as string);
+  answers.set(key, { at: Date.now(), reply });
 }
 
 // One short line per element is much smaller than JSON, so the AI answers faster.
@@ -181,6 +198,14 @@ export async function POST(req: Request) {
     return fail("no_key", "The server isn't set up with an AI key yet. Ask the app owner to add it.", 500);
   }
 
+  const lines = describeElements(elements);
+  const key = cacheKey([goal, site, title, history.join("|"), ...lines]);
+  const hit = lost ? undefined : answers.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) {
+    console.log(`[next-step] remembered answer site=${site || "(unreadable)"} -> "${hit.reply.instruction.slice(0, 100)}"`);
+    return json(hit.reply);
+  }
+
   const started = Date.now();
   try {
     const text = await askModel(provider, {
@@ -190,11 +215,12 @@ export async function POST(req: Request) {
         lost,
         page: site ? { site, title } : { site: "(the page could not be read, or it is a blank tab)", title: "" },
         previousInstructions: history,
-        elements: describeElements(elements),
+        elements: lines,
       }),
       maxTokens: 1000,
     });
     const reply = parseReply(text, elements);
+    if (reply && !lost && reply.status !== "stuck") remember(key, reply);
     console.log(
       `[next-step] ${provider} ${Date.now() - started}ms site=${site || "(unreadable)"} elements=${elements.length} ok=${!!reply}` +
         (reply ? ` -> element=${reply.elementId} open=${reply.open ? reply.open.label : "-"} "${reply.instruction.slice(0, 140)}"` : "")

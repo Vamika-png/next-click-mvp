@@ -17,6 +17,7 @@ const ui = {
   goalText: $("goalText"),
   change: $("change"),
   now: $("now"),
+  nowLabel: $("nowLabel"),
   nowText: $("nowText"),
   nowNote: $("nowNote"),
   nowPrimary: $("nowPrimary"),
@@ -99,9 +100,12 @@ function speak() {
   speechSynthesis.speak(u);
 }
 
-function showNow({ text, note, primary, copyText, problem }) {
+function showNow({ text, note, primary, copyText, problem, label, loading }) {
   ui.now.hidden = false;
   ui.now.classList.toggle("problem", !!problem);
+  ui.nowLabel.textContent = label || "";
+  ui.nowLabel.hidden = !label;
+  ui.nowText.classList.toggle("loading", !!loading);
   ui.nowText.textContent = text || "";
   ui.nowNote.textContent = note || "";
   ui.nowNote.hidden = !note;
@@ -259,7 +263,7 @@ async function look() {
   try {
     setStatus("Looking at your page…");
     // Show something at once, so the panel never looks frozen on the first look.
-    if (ui.now.hidden) showNow({ text: "Looking at your page…" });
+    if (ui.now.hidden) showNow({ text: "Looking at your page", loading: true });
     const tab = await activeTab();
     if (tab && tab.status === "loading" && state.loadWaits < MAX_LOAD_WAITS) {
       state.loadWaits += 1;
@@ -311,6 +315,7 @@ async function look() {
     const missed = reply.elementId !== null && !pointed ? "I can't show you with the orange arrow this time, so look for it using my words." : "";
     const note = [reply.note, unsure, missed].filter(Boolean).join(" ");
     showNow({
+      label: `Step ${state.steps}`,
       text: reply.instruction,
       note,
       copyText: reply.copyText,
@@ -389,7 +394,13 @@ ui.lost.addEventListener("click", imLost);
 // The page tells us when you pressed something or when the thing we pointed at disappeared.
 chrome.runtime.onMessage.addListener((msg) => {
   // The page itself waits until it stops changing before it is read, so these delays can be short.
-  if (msg && msg.type === "nc-event") schedule(msg.kind === "user-acted" ? 500 : 300);
+  if (!msg || msg.type !== "nc-event") return;
+  if (msg.kind === "user-acted" && state.running) {
+    // Answer the click at once: the old step is finished, the next one is on its way.
+    showNow({ label: `Step ${state.steps}`, text: "Nice! Finding your next step", loading: true });
+    setStatus("");
+  }
+  schedule(msg.kind === "user-acted" ? 500 : 300);
 });
 chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
   if (info.status === "complete" && tab.active) schedule(300);
