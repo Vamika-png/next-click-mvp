@@ -234,10 +234,36 @@
     return { ok: true };
   }
 
+  // Pages often keep drawing for a moment after they "finish" loading. Instead of waiting a fixed
+  // time, wait until the page has been still for a short while (never longer than maxMs).
+  function waitForQuiet(quietMs = 350, maxMs = 2500) {
+    return new Promise((resolve) => {
+      let finished = false;
+      let quietTimer = 0;
+      const observer = new MutationObserver(() => {
+        clearTimeout(quietTimer);
+        quietTimer = setTimeout(done, quietMs);
+      });
+      const hardStop = setTimeout(done, maxMs);
+      function done() {
+        if (finished) return;
+        finished = true;
+        clearTimeout(quietTimer);
+        clearTimeout(hardStop);
+        observer.disconnect();
+        resolve();
+      }
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      quietTimer = setTimeout(done, quietMs);
+    });
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || typeof msg.type !== "string") return;
-    if (msg.type === "nc-scan") sendResponse(scan());
-    else if (msg.type === "nc-point") sendResponse(point(msg.id));
+    if (msg.type === "nc-scan") {
+      waitForQuiet().then(() => sendResponse(scan()));
+      return true; // tells Chrome the answer will come a moment later
+    } else if (msg.type === "nc-point") sendResponse(point(msg.id));
     else if (msg.type === "nc-clear") {
       clear();
       sendResponse({ ok: true });

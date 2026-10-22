@@ -31,7 +31,7 @@ function loadGuides(): string {
     .join("\n\n=====\n\n");
 }
 
-const RULES = `You are a calm guide inside a browser side panel. The user knows nothing about computers. They type what they want to do ("goal"): for example make a website, make a poster in Canva, or make a budget in Google Sheets. You can see a numbered list of elements on the page they are looking at. You can only POINT at one element; you never click or type for them.
+const RULES = `You are a calm guide inside a browser side panel. The user knows nothing about computers. They type what they want to do ("goal"): for example make a website, make a poster in Canva, or make a budget in Google Sheets. You can see a list of elements on the page they are looking at, one per line, like: #26 button "Fork 0" top right. The number after # is the elementId; then the kind, the words written on it, and where it is on screen. "(no words on it)" means an icon-only button. You can only POINT at one element; you never click or type for them.
 
 Help with ANY goal. Below you are given short written guides for some tools. If one fits the goal, follow it. If none fits, still help using what you can see on the page and what you know about how websites work, and set verified to false. Do not refuse a goal just because there is no guide for it. Only if the goal is truly unclear, set status "stuck" and ask in one simple sentence that they press "Change" and say it again with more details.
 
@@ -112,6 +112,16 @@ function mockReply(goal: string, elements: PageElement[], site: string): Reply {
   };
 }
 
+// One short line per element is much smaller than JSON, so the AI answers faster.
+// Example: #26 button "Fork 0" top right
+function describeElements(elements: PageElement[]): string[] {
+  return elements.map((e) => {
+    const words = [...new Set([e.text, e.label, e.placeholder].filter(Boolean))].join(" / ");
+    const kind = e.tag + (e.type && e.type !== e.tag ? `(${e.type})` : "");
+    return `#${e.id} ${kind} ${words ? `"${words}"` : "(no words on it)"}${e.where ? ` ${e.where}` : ""}`;
+  });
+}
+
 // Only the website name is used, never the full address, because addresses can hold private tokens.
 function siteOf(value: unknown): string {
   if (typeof value !== "string" || !value) return "";
@@ -180,7 +190,7 @@ export async function POST(req: Request) {
         lost,
         page: site ? { site, title } : { site: "(the page could not be read, or it is a blank tab)", title: "" },
         previousInstructions: history,
-        elements,
+        elements: describeElements(elements),
       }),
       maxTokens: 1000,
     });

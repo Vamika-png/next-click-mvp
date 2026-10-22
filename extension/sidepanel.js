@@ -220,7 +220,7 @@ function openSite(site) {
   state.loadWaits = 0;
   state.repeats = 0;
   state.lastKey = "";
-  schedule(2500);
+  schedule(1200);
 }
 
 // Reads the current tab. A blank tab or a page we may not read is not an error:
@@ -258,6 +258,8 @@ async function look() {
   state.pending = false;
   try {
     setStatus("Looking at your page…");
+    // Show something at once, so the panel never looks frozen on the first look.
+    if (ui.now.hidden) showNow({ text: "Looking at your page…" });
     const tab = await activeTab();
     if (tab && tab.status === "loading" && state.loadWaits < MAX_LOAD_WAITS) {
       state.loadWaits += 1;
@@ -386,11 +388,12 @@ ui.lost.addEventListener("click", imLost);
 
 // The page tells us when you pressed something or when the thing we pointed at disappeared.
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.type === "nc-event") schedule(msg.kind === "user-acted" ? 1500 : 600);
+  // The page itself waits until it stops changing before it is read, so these delays can be short.
+  if (msg && msg.type === "nc-event") schedule(msg.kind === "user-acted" ? 500 : 300);
 });
 chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
-  if (info.status === "complete" && tab.active) schedule(1500);
+  if (info.status === "complete" && tab.active) schedule(300);
 });
-chrome.tabs.onActivated.addListener(() => schedule(800));
+chrome.tabs.onActivated.addListener(() => schedule(300));
 
 ui.goal.value = recallGoal();
