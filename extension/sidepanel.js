@@ -424,6 +424,8 @@ chrome.runtime.onMessage.addListener((msg) => {
     setStatus("");
     schedule(500);
   } else if (msg.kind === "page-changed") {
+    // The thing we pointed at disappeared. Most likely you used it (a menu closed, a new page opened).
+    if (state.running && state.steps > 0) state.afterClick = true;
     schedule(300);
   }
 });
@@ -431,7 +433,11 @@ chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
   if (!tab || !tab.active) return;
   const newPage = info.url && info.url !== state.lastUrl; // address changed (also for in-page navigation)
   const loaded = info.status === "complete" && tab.url && tab.url !== state.lastUrl;
-  if (newPage || loaded) schedule(newPage && !loaded ? 600 : 300);
+  if (newPage || loaded) {
+    // You landed on a different page after our last instruction: treat the step as done.
+    if (state.running && state.steps > 0) state.afterClick = true;
+    schedule(newPage && !loaded ? 600 : 300);
+  }
 });
 chrome.tabs.onActivated.addListener((info) => {
   if (info && info.tabId === state.lastTabId) return; // same tab as before: nothing to do

@@ -12,6 +12,7 @@
   let raf = 0;
   let observer = null;
   let watchTimer = 0;
+  let goneNotified = false; // we already told the panel that the thing we pointed at is gone
 
   const SELECTOR = [
     "a[href]",
@@ -170,8 +171,14 @@
   function place() {
     if (!overlay || !target) return;
     if (!target.isConnected) {
-      raf = requestAnimationFrame(place);
-      return;
+      // The thing we pointed at is gone (a menu closed, the page changed). Hide the arrow at once
+      // instead of leaving it stuck where the thing used to be, and tell the panel.
+      overlay.host.style.display = "none";
+      if (!goneNotified) {
+        goneNotified = true;
+        notify("page-changed");
+      }
+      return; // stop following; the panel will point again after it looks
     }
     const r = target.getBoundingClientRect();
     const pad = 5;
@@ -204,27 +211,41 @@
 
   // Only a press on the thing we pointed at counts as "you did it". A click anywhere else
   // (scrolling around, reading) does not move the guide forward.
-  function onUserAction(event) {
-    if (!target) return;
-    const hit = event && event.target;
-    let pressed = false;
-    if (hit && hit.nodeType === 1) {
-      const clickable = hit.closest ? hit.closest("a,button,summary,label,[role=button],[role=link],[role=menuitem],[role=tab]") : null;
-      pressed = target === hit || target.contains(hit) || (!!clickable && (clickable === target || clickable.contains(target)));
+  // We listen for the moment the mouse goes DOWN, not only for the finished click, because menus
+  // often close the instant you press, so a "click" never arrives. The Enter and Space keys count too.
+  function isPress(event) {
+    if (!target || !event) return false;
+    const hit = event.target;
+    if (event.type === "keydown") {
+      if (event.key !== "Enter" && event.key !== " ") return false;
+      const active = document.activeElement;
+      return !!active && (active === target || target.contains(active));
     }
-    if (event && event.type === "submit") pressed = !!(hit && hit.contains && hit.contains(target));
-    if (!pressed) return;
-    clear(); // take the old arrow away at once, so it never points at something that is gone
-    notify("user-acted");
+    if (event.type === "submit") return !!(hit && hit.contains && hit.contains(target));
+    if (!hit || hit.nodeType !== 1) return false;
+    const clickable = hit.closest ? hit.closest("a,button,summary,label,[role=button],[role=link],[role=menuitem],[role=tab]") : null;
+    return target === hit || target.contains(hit) || (!!clickable && (clickable === target || clickable.contains(target)));
   }
+
+  function onUserAction(event) {
+    if (!isPress(event)) return;
+    clear(); // take the old arrow away at once, so it never points at something that is gone
+    // A short pause lets the page start reacting before the panel looks again.
+    setTimeout(() => notify("user-acted"), event.type === "pointerdown" ? 150 : 0);
+  }
+
+  const PRESS_EVENTS = ["pointerdown", "click", "submit", "keydown"];
 
   function watchTarget() {
     if (observer) observer.disconnect();
     observer = new MutationObserver(() => {
       clearTimeout(watchTimer);
       watchTimer = setTimeout(() => {
-        if (target && !target.isConnected) notify("page-changed");
-      }, 1200);
+        if (target && !target.isConnected && !goneNotified) {
+          goneNotified = true;
+          notify("page-changed");
+        }
+      }, 200);
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
@@ -237,8 +258,7 @@
     if (overlay) overlay.host.remove();
     overlay = null;
     target = null;
-    document.removeEventListener("click", onUserAction, true);
-    document.removeEventListener("submit", onUserAction, true);
+    PRESS_EVENTS.forEach((name) => document.removeEventListener(name, onUserAction, true));
   }
 
   function point(id) {
@@ -246,12 +266,12 @@
     const el = registry.get(id);
     if (!el || !el.isConnected) return { ok: false };
     target = el;
+    goneNotified = false;
     el.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
     ensureOverlay();
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(place);
-    document.addEventListener("click", onUserAction, true);
-    document.addEventListener("submit", onUserAction, true);
+    PRESS_EVENTS.forEach((name) => document.addEventListener(name, onUserAction, true));
     watchTarget();
     return { ok: true };
   }

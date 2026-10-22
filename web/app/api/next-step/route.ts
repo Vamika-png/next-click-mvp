@@ -23,13 +23,26 @@ export function OPTIONS() {
 }
 
 // Every file in lib/guides/ is one tool's guide. Add a file there to teach the AI a new tool.
-function loadGuides(): string {
+// To keep the AI fast we only give it the guide(s) that fit the goal or the website. A guide with no
+// entry below is always included. If nothing fits, the AI gets all of them and decides itself.
+const GUIDE_MATCH: Record<string, { goal: RegExp; site: RegExp }> = {
+  "app-launch.md": {
+    goal: /app|website|web ?site|web ?page|deploy|launch|host|online|internet|vercel|github|lovable|v0|bolt|build|automation|code/i,
+    site: /lovable|v0\.|bolt\.new|github|vercel/i,
+  },
+  "canva.md": { goal: /canva|poster|flyer|logo|instagram|design|slides?|presentation|card/i, site: /canva/i },
+  "sheets.md": { goal: /sheets?|spreadsheet|budget|excel|tracker|formula|table/i, site: /docs\.google|sheets/i },
+};
+
+function loadGuides(goal: string, site: string): string {
   const dir = join(process.cwd(), "lib", "guides");
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".md"))
-    .sort()
-    .map((f) => readFileSync(join(dir, f), "utf8").trim())
-    .join("\n\n=====\n\n");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+  const fits = files.filter((f) => {
+    const m = GUIDE_MATCH[f];
+    return !m || m.goal.test(goal) || m.site.test(site);
+  });
+  const chosen = fits.length > 0 ? fits : files;
+  return chosen.map((f) => readFileSync(join(dir, f), "utf8").trim()).join("\n\n=====\n\n");
 }
 
 const RULES = `You are a calm guide inside a browser side panel. The user knows nothing about computers. They type what they want to do ("goal"): for example make a website, make a poster in Canva, or make a budget in Google Sheets. You can see a list of elements on the page they are looking at, one per line, like: #26 button "Fork 0" top right. The number after # is the elementId; then the kind, the words written on it, and where it is on screen. "(no words on it)" means an icon-only button. You can only POINT at one element; you never click or type for them.
@@ -38,7 +51,7 @@ Help with ANY goal. Below you are given short written guides for some tools. If 
 
 Work out where they are from the page (site, title, elements) and your previous instructions. If the goal is only part of a longer job, do only that part.
 
-You keep guiding them step after step until the goal is done. When "afterClick" is true, the user has just pressed the thing you pointed at, so your previous instruction is DONE: give the NEXT step. Never repeat your previous instruction. If the page looks the same as before, say in the note what should happen next, and point at whatever comes next (for example a menu that just opened, or the next field). When "afterClick" is false you are looking at the page for the first time or it changed on its own: give the step that fits what you see now.
+You keep guiding them step after step until the goal is done. When "afterClick" is true, the user has just pressed the thing you pointed at, so your previous instruction is DONE: give the NEXT step. Never repeat your previous instruction word for word, and never tell them to press something that is no longer on the page. Read the page title and the elements: if the page already shows the result of your last step (for example a "New Project" page after you said to press "Project"), move on to what comes next. If the page looks exactly the same as before, say in the note that nothing seems to have changed, and point at the same thing again. When "afterClick" is false you are looking at the page for the first time or it changed on its own: give the step that fits what you see now.
 
 Answer with ONE JSON object and nothing else:
 {"status":"continue"|"done"|"stuck","instruction":"<MAX 15 words: the action and where it is>","note":"<MAX 20 words: why, or what will happen next, or null>","elementId":<number from the list or null>,"copyText":"<text to paste or null>","open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false}
@@ -212,7 +225,7 @@ export async function POST(req: Request) {
   const started = Date.now();
   try {
     const text = await askModel(provider, {
-      system: `${RULES}\n\n--- GUIDES ---\n${loadGuides()}`,
+      system: `${RULES}\n\n--- GUIDES ---\n${loadGuides(goal, site)}`,
       user: JSON.stringify({
         goal,
         lost,
@@ -227,7 +240,12 @@ export async function POST(req: Request) {
     if (reply && !lost && reply.status !== "stuck") remember(key, reply);
     console.log(
       `[next-step] ${provider} ${Date.now() - started}ms site=${site || "(unreadable)"} elements=${elements.length} ok=${!!reply}` +
-        (reply ? ` -> element=${reply.elementId} open=${reply.open ? reply.open.label : "-"} "${reply.instruction.slice(0, 140)}"` : "")
+        (reply
+          ? ` afterClick=${afterClick} -> element=${reply.elementId}${(() => {
+              const e = elements.find((x) => x.id === reply.elementId);
+              return e ? ` ("${(e.text || e.label || e.placeholder || "no words").slice(0, 40)}", ${e.where})` : "";
+            })()} open=${reply.open ? reply.open.label : "-"} "${reply.instruction.slice(0, 140)}"`
+          : "")
     );
     if (!reply) {
       return fail("bad_ai_reply", "I got confused reading this page. Please press the button again.", 502);
