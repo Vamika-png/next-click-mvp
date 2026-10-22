@@ -18,7 +18,7 @@ const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"; // fast: used for almost e
 const DEFAULT_GEMINI_STRONG = "gemini-3.6-flash"; // stronger: first choice when ask.strong is true (long messages)
 const STRONG_HEDGE_MS = 4_000;
 const CLAUDE_MODEL = "claude-haiku-5-5";
-const GEMINI_TIMEOUT_MS = 10_000;
+const GEMINI_TIMEOUT_MS = 20_000; // the panel waits up to 30 s, so a slow moment at Google is waited out, not failed
 const HEDGE_MS = 2_500;
 
 export type AiFailure = "key" | "busy" | "other";
@@ -27,6 +27,20 @@ export class AiError extends Error {
   constructor(public kind: AiFailure, message: string, public retryable = false) {
     super(message);
   }
+}
+
+// Free Gemini models have a daily allowance. When Google says a model is used up for the day, skip it
+// (instead of wasting an attempt on every request) until it should be back, but re-check at least every 6 hours.
+const exhaustedUntil = new Map<string, number>();
+const MAX_SKIP_MS = 6 * 60 * 60 * 1000;
+
+function markExhausted(model: string, retrySeconds: number) {
+  const ms = Math.min(Math.max(retrySeconds, 60) * 1000, MAX_SKIP_MS);
+  exhaustedUntil.set(model, Date.now() + ms);
+}
+
+function isUsable(model: string): boolean {
+  return (exhaustedUntil.get(model) ?? 0) <= Date.now();
 }
 
 export function pickProvider(): Provider | null {
@@ -41,7 +55,8 @@ export function pickProvider(): Provider | null {
 }
 
 // strong: true asks for the stronger model first (used where the AI writes a long message).
-type Ask = { system: string; user: string; maxTokens: number; strong?: boolean };
+// timeoutMs: how long one model may take (default 10 s). Background jobs that nobody waits for may take longer.
+type Ask = { system: string; user: string; maxTokens: number; strong?: boolean; timeoutMs?: number };
 
 // "minimal" thinking answers in about 1.5 seconds instead of about 10, and our task (pick one
 // button, write a short sentence) does not need long thinking. Set GEMINI_THINKING=default to
@@ -51,7 +66,7 @@ function thinkingConfig(): { thinkingLevel: string } | undefined {
   return level === "default" ? undefined : { thinkingLevel: level };
 }
 
-async function callGemini(model: string, { system, user, maxTokens }: Ask, withThinking = true): Promise<string> {
+async function callGemini(model: string, { system, user, maxTokens, timeoutMs }: Ask, withThinking = true): Promise<string> {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
     headers: {
@@ -68,7 +83,7 @@ async function callGemini(model: string, { system, user, maxTokens }: Ask, withT
         ...(withThinking && thinkingConfig() ? { thinkingConfig: thinkingConfig() } : {}),
       },
     }),
-    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs ?? GEMINI_TIMEOUT_MS),
   }).catch((err) => {
     const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
     throw new AiError("other", timedOut ? `${model} took too long.` : `Could not reach ${model}.`, true);
@@ -76,13 +91,22 @@ async function callGemini(model: string, { system, user, maxTokens }: Ask, withT
 
   if (!res.ok) {
     let detail = "";
+    let dayLimit = false;
+    let retrySeconds = 3600;
     try {
       const body = await res.json();
       detail = String(body?.error?.message ?? "").slice(0, 200);
+      const details: unknown[] = Array.isArray(body?.error?.details) ? body.error.details : [];
+      dayLimit = /PerDay/i.test(JSON.stringify(details));
+      const delay = details.map((d) => (d as { retryDelay?: unknown })?.retryDelay).find((x) => typeof x === "string") as string | undefined;
+      if (delay && Number.isFinite(Number(delay.replace(/s$/, "")))) retrySeconds = Number(delay.replace(/s$/, ""));
     } catch {
       /* no body */
     }
-    if (res.status === 429) throw new AiError("busy", `${model} is out of free requests for now (429). ${detail}`, true);
+    if (res.status === 429) {
+      if (dayLimit) markExhausted(model, retrySeconds);
+      throw new AiError("busy", `${model} is out of free requests ${dayLimit ? "for today" : "for now"} (429). ${detail}`, true);
+    }
     if (res.status === 503 || res.status === 500 || res.status === 502 || res.status === 504) {
       throw new AiError("busy", `${model} is overloaded (${res.status}). ${detail}`, true);
     }
@@ -118,9 +142,15 @@ async function callGeminiSafely(model: string, ask: Ask): Promise<string> {
 function askGemini(ask: Ask): Promise<string> {
   const fast = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
   const strong = process.env.GEMINI_STRONG_MODEL || DEFAULT_GEMINI_STRONG;
-  const first = ask.strong ? strong : fast;
-  const backup = ask.strong ? fast : strong;
+  let first = ask.strong ? strong : fast;
+  let backup: string | null = ask.strong ? fast : strong;
   const hedgeMs = ask.strong ? STRONG_HEDGE_MS : HEDGE_MS;
+  // A model that is used up for today is not worth asking: use the other one straight away.
+  if (!isUsable(first) && backup && isUsable(backup)) [first, backup] = [backup, first];
+  if (backup && !isUsable(backup) && isUsable(first)) backup = null;
+  // No other model to lean on (it is used up for today): if the first is slow, ask the SAME model a second
+  // time and use whichever answer comes first. Slow moments usually hit one request, not both.
+  if (!backup) backup = first;
 
   return new Promise<string>((resolve, reject) => {
     const errors: AiError[] = [];
@@ -145,21 +175,21 @@ function askGemini(ask: Ask): Promise<string> {
           const e = err instanceof AiError ? err : new AiError("other", String(err?.message ?? err), true);
           if (e.kind === "key") return finish(() => reject(e)); // a bad key will not get better with another model
           errors.push(e);
-          if (!backupStarted) return startBackup();
+          if (!backupStarted && backup) return startBackup();
           if (errors.length >= started) finish(() => reject(errors.find((x) => x.kind === "busy") ?? errors[errors.length - 1]));
         }
       );
     };
 
     const startBackup = () => {
-      if (backupStarted || finished) return;
+      if (backupStarted || finished || !backup) return;
       backupStarted = true;
       if (hedgeTimer) clearTimeout(hedgeTimer);
       launch(backup);
     };
 
     launch(first);
-    hedgeTimer = setTimeout(startBackup, hedgeMs);
+    if (backup) hedgeTimer = setTimeout(startBackup, hedgeMs);
   });
 }
 

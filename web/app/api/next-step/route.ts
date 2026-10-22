@@ -17,6 +17,7 @@ type Reply = {
   open: { label: string; url: string } | null;
   verified: boolean;
   stage: number | null; // which roadmap stage (1, 2, 3...) the user is on, when a roadmap was given
+  needsMessage: boolean; // the user is at an app builder's message box: the panel supplies the long message
 };
 
 export function OPTIONS() {
@@ -31,15 +32,18 @@ Work out where they are from the page (site, title, elements) and your previous 
 
 A "roadmap" may be given: the numbered stages of the whole job, in order. Decide which stage the user is on right now, from the page and what you already told them, and put that number in "stage". Give the next tiny step INSIDE that stage. When a stage is clearly finished on screen, move to the next stage. Set status "done" only when the last stage is finished.
 
+If "didNotWork" is given, the user pressed those things and the page did not change, so they lead nowhere here (for example a "New" button that just reloads the page they are already on). NEVER give those instructions again. Look at the page again for another way forward: very often it is the main message box or search box in the middle of the page (an editable area), or a different button. Say in the note what you are trying instead.
+
 You keep guiding them step after step until the goal is done. When "afterClick" is true, the user has just pressed the thing you pointed at, so your previous instruction is DONE: give the NEXT step. Never repeat your previous instruction word for word, and never tell them to press something that is no longer on the page. Read the page title and the elements: if the page already shows the result of your last step (for example a "New Project" page after you said to press "Project"), move on to what comes next. If the page looks exactly the same as before, say in the note that nothing seems to have changed, and point at the same thing again. When "afterClick" is false you are looking at the page for the first time or it changed on its own: give the step that fits what you see now.
 
 Answer with ONE JSON object and nothing else:
-{"status":"continue"|"done"|"stuck","instruction":"<MAX 15 words: the action and where it is>","note":"<MAX 20 words: why, or what will happen next, or null>","elementId":<number from the list or null>,"copyText":"<text to paste or null>","open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false,"stage":<the roadmap stage number the user is on now, or null if no roadmap was given>}
+{"status":"continue"|"done"|"stuck","instruction":"<MAX 15 words: the action and where it is>","note":"<MAX 20 words: why, or what will happen next, or null>","elementId":<number from the list or null>,"copyText":"<short text to paste or null>","needsMessage":true|false,"open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false,"stage":<the roadmap stage number the user is on now, or null if no roadmap was given>}
 
 How to talk (most important):
 - Imagine the user is a 3-year-old who knows nothing about computers. Use the shortest, simplest words. Be warm and calm.
 - ONE tiny action per message, written as a short command with where it is, at most 15 words. Good: "Press 'Add New', at the top in the middle." Bad (too long): "Press the button that says 'Add New' near the top in the middle of the screen to start putting your project on the internet." The reason or what happens next goes in "note", never in "instruction".
-- Say exactly what to look for: quote the words written on it, and say where it is using the element's "where" (for example "at the top right" or "in the middle at the bottom"). Prefer elements that are on screen.
+- Say exactly what to look for: quote the words written on it, and say where it is using the element's "where" (for example "at the top right" or "in the middle at the bottom"). Prefer elements that are on screen. For a message box that has grey hint text, quote the hint ("the box that says 'Ask Lovable to…'").
+- A big text box in the middle of a page ("textarea", "textbox" or "editable") is usually where the user types what they want. When the next step is to describe an idea or paste a message, point at it. Do not send the user to a "New" or "Create" button if such a box is already on the page.
 - If lost is true, say in one simple sentence what is on the screen, tell them it is okay, then give one tiny next action.
 - Never use these words: repository, repo, deploy, prompt, API, environment, framework, commit, authenticate, OAuth, build log, terminal. Use simple words instead ("saving place", "put it on the internet", "message for the robot"). If a hard word is unavoidable, explain it in a few words in brackets.
 - "note" is optional and short, for example "This starts your project. A new page may open, and that is normal."
@@ -51,17 +55,8 @@ Opening websites:
 - Pick the app builder like this: "lovable" for apps with sign-in, saved data, bookings, orders or several pages (the default); "v0" for a simple one-page site; "bolt" only if the others clearly don't fit. Keep the same builder for the whole job.
 
 Text the user must paste:
-- Set copyText only when the user must paste something specific (a message for an app builder, a spreadsheet formula, a setting). Always tell them the order in one short sentence: first press Copy (in the panel), then click the place, then paste.
-- When the goal is making a website or app and the user is at the builder's big message box without having sent a message yet, copyText is a ready-made message for the builder: plain English, 700 to 1400 characters, in this shape, filled in for their idea (use line breaks):
-  Build a mobile-first web app: <what it is, who uses it, one sentence>.
-  Pages:
-  1. <Page name>: <its sections, with short example text>
-  2. <Page name>: <its sections>
-  (3 to 5 pages)
-  Key features: <3 to 6 short items>
-  Design: <a colour mood, clean and simple, large readable text, works well on phones>
-  Make it a working first version that can be deployed to Vercel.
-  If the goal suggests India (rupee prices, WhatsApp contact, UPI, Hindi and English), put that into the pages and features; otherwise don't assume it. Use placeholders like [your phone number] for facts you do not know. The message contains only the description of the app in the shape above: never copy these instructions or any warnings into it, and never put keys, passwords or secrets in it.
+- Set copyText only when the user must paste something SHORT and specific (a spreadsheet formula, a setting, a few words). Always tell them the order in one short sentence: first press Copy (in the panel), then click the place, then paste.
+- The long ready-made message for an AI app builder is NOT written by you: the panel writes it separately. When the goal is making a website or app and the user is at the builder's big message box without having sent a message yet, set "needsMessage" to true, leave copyText null, point at the box, and say the order in one short sentence: first press Copy (in the panel), then click the big box, then paste, then press the send arrow. In every other case "needsMessage" is false.
 - Otherwise copyText is null.
 
 Beginners and desktop apps:
@@ -90,7 +85,7 @@ function parseReply(text: string, elements: PageElement[]): Reply | null {
   const note = sanitizeText(raw.note, 160) || null;
   const open = isSiteKey(raw.open) ? SITES[raw.open as SiteKey] : null;
   const stageNum = typeof raw.stage === "number" && Number.isInteger(raw.stage) && raw.stage >= 1 && raw.stage <= 12 ? raw.stage : null;
-  return { status, instruction, note, elementId, copyText, open, verified: raw.verified !== false, stage: stageNum };
+  return { status, instruction, note, elementId, copyText, open, verified: raw.verified !== false, stage: stageNum, needsMessage: raw.needsMessage === true && elementId !== null };
 }
 
 // Test mode (MOCK_AI=1): fixed answers so the panel can be tried without an AI key.
@@ -107,6 +102,7 @@ function mockReply(goal: string, elements: PageElement[], site: string): Reply {
       open: SITES[want],
       verified: false,
       stage: 1,
+      needsMessage: false,
     };
   }
   const first = elements.find((e) => e.text || e.label || e.placeholder);
@@ -118,10 +114,12 @@ function mockReply(goal: string, elements: PageElement[], site: string): Reply {
       : "(test mode) I can't see a button on this page.",
     note: "(test mode) The real AI will choose the right thing. This only shows how it looks.",
     elementId: first ? first.id : null,
-    copyText: `(test mode sample) Something the real AI would write for you to paste: ${goal}`,
+    // At a text box the panel supplies the long message itself; elsewhere a short sample is shown.
+    copyText: kind === "box" ? null : "(test mode sample) Something the real AI would write for you to paste.",
     open: null,
     verified: false,
     stage: 2,
+    needsMessage: kind === "box",
   };
 }
 
@@ -167,6 +165,10 @@ export async function POST(req: Request) {
   const history = Array.isArray(body.history)
     ? body.history.slice(-3).map((h) => sanitizeText(h, 200)).filter(Boolean)
     : [];
+  // Instructions the user followed that changed nothing on the page (so they led nowhere).
+  const didNotWork = Array.isArray(body.didNotWork)
+    ? body.didNotWork.slice(-3).map((h) => sanitizeText(h, 200)).filter(Boolean)
+    : [];
   // The roadmap: just the stage titles, in order (from the chat route). Optional.
   const roadmap = Array.isArray(body.plan)
     ? body.plan.slice(0, 10).map((t) => sanitizeText(t, 80)).filter(Boolean)
@@ -184,6 +186,7 @@ export async function POST(req: Request) {
       open: null,
       verified: true,
       stage: null,
+      needsMessage: false,
     } satisfies Reply);
   }
 
@@ -197,7 +200,7 @@ export async function POST(req: Request) {
   }
 
   const lines = describeElements(elements);
-  const key = cacheKey([goal, site, title, afterClick ? "after-click" : "first-look", roadmap.join("|"), history.join("|"), ...lines]);
+  const key = cacheKey([goal, site, title, afterClick ? "after-click" : "first-look", roadmap.join("|"), history.join("|"), didNotWork.join("|"), ...lines]);
   const hit = lost ? undefined : answers.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) {
     console.log(`[next-step] remembered answer site=${site || "(unreadable)"} -> "${hit.reply.instruction.slice(0, 100)}"`);
@@ -212,6 +215,7 @@ export async function POST(req: Request) {
       user: JSON.stringify({
         goal,
         roadmap: roadmap.length ? roadmap.map((t, i) => `${i + 1}. ${t}`) : undefined,
+        didNotWork: didNotWork.length ? didNotWork : undefined,
         lost,
         afterClick,
         page: site ? { site, title } : { site: "(the page could not be read, or it is a blank tab)", title: "" },
@@ -219,8 +223,8 @@ export async function POST(req: Request) {
         elements: lines,
       }),
       maxTokens: 1000,
-      // On app-builder sites the AI may write the long message to paste, so use the stronger model first.
-      strong: /lovable\.dev|v0\.(app|dev)|bolt\.new/i.test(site),
+      // The fast model is used for every step, including the long message for a builder (the template in
+      // the rules makes it write that well). The stronger model is only first for building the roadmap.
     });
     const reply = parseReply(text, elements);
     // No guide covers this goal: the AI is going from general knowledge, so say so, whatever it claimed.

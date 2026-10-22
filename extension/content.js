@@ -29,7 +29,34 @@
     "[role=tab]",
     "[role=checkbox]",
     "[role=option]",
+    "[role=radio]",
+    "[role=switch]",
+    "[role=menuitemcheckbox]",
+    "[role=menuitemradio]",
+    // Modern sites (Lovable, Claude, ChatGPT, Notion...) build their message box as an editable area,
+    // not as a plain text box. Without these, the main box on the page would be invisible to us.
+    "[contenteditable]:not([contenteditable=false])",
+    "[role=textbox]",
+    "[role=searchbox]",
+    "[role=combobox]",
   ].join(",");
+
+  // True for any place you can type: a plain box, an editable area, or a custom text box.
+  function isEditable(el) {
+    const tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    const ce = el.getAttribute("contenteditable");
+    if (ce !== null && ce !== "false") return true;
+    return /^(textbox|searchbox|combobox)$/i.test(el.getAttribute("role") || "");
+  }
+
+  // Grey hint text inside editable areas (editors keep it in a data attribute, not in "placeholder").
+  function editablePlaceholder(el) {
+    const own = el.getAttribute("placeholder") || el.getAttribute("aria-placeholder") || el.getAttribute("data-placeholder");
+    if (own) return own;
+    const inner = el.querySelector ? el.querySelector("[data-placeholder],[aria-placeholder]") : null;
+    return inner ? inner.getAttribute("data-placeholder") || inner.getAttribute("aria-placeholder") || "" : "";
+  }
 
   const KEY_PATTERNS = [
     /sk-[A-Za-z0-9_-]{10,}/,
@@ -50,7 +77,11 @@
   }
 
   function isSecretField(el) {
-    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return false;
+    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") {
+      // An editable area or custom text box: skip it if it looks meant for a password, key or code.
+      if (!isEditable(el)) return false;
+      return SECRET_FIELD_NAME.test([el.id, el.getAttribute("aria-label"), el.getAttribute("name"), editablePlaceholder(el)].join(" "));
+    }
     const type = (el.getAttribute("type") || "").toLowerCase();
     if (type === "password" || type === "hidden") return true;
     const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
@@ -99,8 +130,11 @@
       if (isSecretField(el)) continue;
       const rect = el.getBoundingClientRect();
       if (!isVisible(el, rect)) continue;
+      // An editable area inside another editable thing is the same box: list it once.
+      if (isEditable(el) && el.parentElement && el.parentElement.closest("[contenteditable]:not([contenteditable=false]),[role=textbox],[role=searchbox],[role=combobox]")) continue;
       const type = (el.getAttribute("type") || "").toLowerCase();
-      const isField = el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
+      // Anything you can type in is a "field": we never read what is typed in it (that is private).
+      const isField = isEditable(el);
       let text = "";
       if (!isField) text = el.innerText;
       else if (type === "submit" || type === "button") text = el.value; // button label, not typed text
@@ -111,7 +145,7 @@
           tag: el.tagName.toLowerCase(),
           text: clean(text, 80),
           label: clean(labelFor(el), 80),
-          placeholder: clean(el.getAttribute("placeholder"), 80),
+          placeholder: clean(isField ? editablePlaceholder(el) : el.getAttribute("placeholder"), 80),
           type,
           where: whereOnScreen(rect),
         },

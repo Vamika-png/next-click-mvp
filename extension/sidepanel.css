@@ -167,6 +167,9 @@ pre {
   color: var(--code-ink); background: var(--code-bg); border-radius: 16px;
 }
 
+pre.loading { color: var(--muted); font-style: italic; }
+pre.loading::after { content: ""; display: inline-block; width: 1.4em; text-align: left; animation: dots 1.2s steps(4, end) infinite; }
+
 /* ---------- status ---------- */
 .status { min-height: 22px; margin: 14px 4px 0; text-align: center; font-size: 13.5px; color: var(--muted); }
 .status.problem { color: var(--warn); font-weight: 700; }
@@ -209,7 +212,7 @@ pre {
   position: sticky; bottom: 0; margin: auto -16px -30px; padding: 12px 16px 16px; display: flex; align-items: flex-end; gap: 8px;
   background: linear-gradient(to top, var(--bg) 70%, transparent);
 }
-.dock textarea { min-height: 46px; max-height: 120px; padding: 12px 16px; border-radius: 24px; font-size: 15px; resize: none; }
+.dock textarea { min-height: 46px; max-height: 120px; padding: 11px 16px; border-radius: 24px; font-size: 15px; line-height: 1.4; resize: none; overflow-y: hidden; }
 .send {
   flex: none; width: 46px; height: 46px; border: 0; border-radius: 50%; display: grid; place-items: center; padding: 0;
   background: linear-gradient(135deg, var(--accent-2), var(--accent)); box-shadow: var(--glow); transition: transform .12s ease;

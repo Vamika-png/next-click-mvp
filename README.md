@@ -6,7 +6,9 @@ It works on any normal website. It has written guides for four jobs so far: maki
 
 Two parts:
 - `extension/` the Chrome extension (side panel + arrow)
-- `web/` a small Next.js server with two routes, the only places the AI is called: `/api/chat` (the roadmap and your questions) and `/api/next-step` (the next button to press)
+- `web/` a small Next.js server with three routes, the only places the AI is called: `/api/chat` (the roadmap and your questions), `/api/next-step` (the next button to press) and `/api/message` (the long message for an app builder, written in the background while you sign up, because it is the slowest thing the AI does)
+
+Gemini's free tier has daily and per-minute limits for each model, and it can be slow at busy times. The server skips a model that says it is used up for the day, asks again if one is slow, and shows a friendly "I'm a little busy" message if everything is full. For many users, switch the key to a paid plan.
 
 ## What you see
 
@@ -34,7 +36,7 @@ Gemini (Google) is the default; Claude (Anthropic) also works.
 1. Create a key at **aistudio.google.com** (Get API key). Check its free limits there.
 2. In `web/.env.local` paste the key after `GEMINI_API_KEY=` and change `MOCK_AI=1` to `MOCK_AI=0`. Save, then restart `npm run dev`.
 3. To use Claude instead: paste a key after `ANTHROPIC_API_KEY=` and set `AI_PROVIDER=claude`.
-4. Two Gemini models are used. A fast light one (`GEMINI_MODEL`, default `gemini-3.5-flash-lite`) answers almost every step in about a second and a half. A stronger one (`GEMINI_STRONG_MODEL`, default `gemini-3.6-flash`) goes first on app-builder sites, where the AI writes the long message, and steps in whenever the fast one is slow, busy or out of free requests. If Google renames a model, set the name in the same file. Each model has its own free allowance.
+4. Two Gemini models are used. A fast light one (`GEMINI_MODEL`, default `gemini-3.5-flash-lite`) answers almost every step in about a second and a half. A stronger one (`GEMINI_STRONG_MODEL`, default `gemini-3.6-flash`) goes first when the roadmap is built, and steps in whenever the fast one is slow, busy or out of free requests. If Google renames a model, set the name in the same file. Each model has its own free allowance.
 5. The key stays on the server. It is never in the extension, and `.env*` files are git-ignored.
 
 ## Deploy the server to Vercel
