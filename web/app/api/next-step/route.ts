@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { sanitizeElements, sanitizeText, type PageElement } from "@/lib/sanitize";
 import { extractJson, fail, json, preflight, rateLimited } from "@/lib/http";
 import { isSiteKey, SITE_KEYS, SITES, type SiteKey } from "@/lib/sites";
 import { AiError, askModel, pickProvider } from "@/lib/ai";
+import { loadGuides } from "@/lib/guides";
+import { describeElements, siteOf } from "@/lib/elements";
 
 export const runtime = "nodejs";
 
@@ -16,39 +16,11 @@ type Reply = {
   copyText: string | null;
   open: { label: string; url: string } | null;
   verified: boolean;
+  stage: number | null; // which roadmap stage (1, 2, 3...) the user is on, when a roadmap was given
 };
 
 export function OPTIONS() {
   return preflight();
-}
-
-// Every file in lib/guides/ is one tool's guide. Add a file there to teach the AI a new tool.
-// To keep the AI fast we only give it the guide(s) that fit the goal or the website. A guide with no
-// entry below is always included. If nothing fits, the AI gets all of them and decides itself.
-const GUIDE_MATCH: Record<string, { goal: RegExp; site: RegExp }> = {
-  "app-launch.md": {
-    goal: /\bapps?\b|website|web ?site|web ?page|landing page|deploy|launch|host|online|internet|vercel|github|lovable|\bv0\b|bolt/i,
-    site: /lovable|v0\.|bolt\.new|github|vercel/i,
-  },
-  "canva.md": { goal: /canva|poster|flyer|logo|instagram (post|story|poster|reel)|social media post|slides?|presentation|greeting card|invitation/i, site: /canva/i },
-  "sheets.md": { goal: /sheets?|spreadsheet|budget|excel|tracker|formula|table/i, site: /docs\.google\.com\/spreadsheets|sheets/i },
-  "automation.md": {
-    goal: /automat|\bzap(s|ier)?\b|workflow|integrat|trigger|n8n|make\.com|when .+ then|every time|save .+ (to|in) /i,
-    site: /zapier|make\.com|n8n/i,
-  },
-};
-
-// Returns the guide text, and whether any guide really fit. When none fits we still help, but the
-// answer is labelled "I'm not 100% sure".
-function loadGuides(goal: string, site: string): { text: string; fit: boolean } {
-  const dir = join(process.cwd(), "lib", "guides");
-  const files = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
-  const fits = files.filter((f) => {
-    const m = GUIDE_MATCH[f];
-    return !m || m.goal.test(goal) || m.site.test(site);
-  });
-  const chosen = fits.length > 0 ? fits : files;
-  return { text: chosen.map((f) => readFileSync(join(dir, f), "utf8").trim()).join("\n\n=====\n\n"), fit: fits.length > 0 };
 }
 
 const RULES = `You are a calm guide inside a browser side panel. The user knows nothing about computers. They type what they want to do ("goal"): for example make a website, make a poster in Canva, or make a budget in Google Sheets. You can see a list of elements on the page they are looking at, one per line, like: #26 button "Fork 0" top right. The number after # is the elementId; then the kind, the words written on it, and where it is on screen. "(no words on it)" means an icon-only button. You can only POINT at one element; you never click or type for them.
@@ -57,10 +29,12 @@ Help with ANY goal. Below you are given short written guides for some tools. If 
 
 Work out where they are from the page (site, title, elements) and your previous instructions. If the goal is only part of a longer job, do only that part.
 
+A "roadmap" may be given: the numbered stages of the whole job, in order. Decide which stage the user is on right now, from the page and what you already told them, and put that number in "stage". Give the next tiny step INSIDE that stage. When a stage is clearly finished on screen, move to the next stage. Set status "done" only when the last stage is finished.
+
 You keep guiding them step after step until the goal is done. When "afterClick" is true, the user has just pressed the thing you pointed at, so your previous instruction is DONE: give the NEXT step. Never repeat your previous instruction word for word, and never tell them to press something that is no longer on the page. Read the page title and the elements: if the page already shows the result of your last step (for example a "New Project" page after you said to press "Project"), move on to what comes next. If the page looks exactly the same as before, say in the note that nothing seems to have changed, and point at the same thing again. When "afterClick" is false you are looking at the page for the first time or it changed on its own: give the step that fits what you see now.
 
 Answer with ONE JSON object and nothing else:
-{"status":"continue"|"done"|"stuck","instruction":"<MAX 15 words: the action and where it is>","note":"<MAX 20 words: why, or what will happen next, or null>","elementId":<number from the list or null>,"copyText":"<text to paste or null>","open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false}
+{"status":"continue"|"done"|"stuck","instruction":"<MAX 15 words: the action and where it is>","note":"<MAX 20 words: why, or what will happen next, or null>","elementId":<number from the list or null>,"copyText":"<text to paste or null>","open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false,"stage":<the roadmap stage number the user is on now, or null if no roadmap was given>}
 
 How to talk (most important):
 - Imagine the user is a 3-year-old who knows nothing about computers. Use the shortest, simplest words. Be warm and calm.
@@ -72,7 +46,7 @@ How to talk (most important):
 - When the user meets a new part of an app for the first time (a menu, a tab, a setting), say in the note, in a few words, what it is for. This is how they learn to use the app.
 
 Opening websites:
-- If the user is not on the right website for the next step (or the page list is empty because it can't be read), and the right website is one of these names: ${SITE_KEYS.join(", ")}, set "open" to that name and elementId to null, and say in the instruction which site you are opening and why, in one simple sentence. The panel shows an Open button; never write web addresses yourself.
+- If the user is not on the right website for the next step (or the page list is empty because it can't be read), and the right website is one of these names: ${SITE_KEYS.join(", ")}, set "open" to that name and elementId to null, and say in the instruction which site you are opening and why, in one simple sentence. The panel shows an Open button; never write web addresses (like "lovable.dev") in your sentences, only the plain name of the site (like "Lovable").
 - If the right website is not in that list, set "open" to null and say its name in the instruction so they can open it themselves.
 - Pick the app builder like this: "lovable" for apps with sign-in, saved data, bookings, orders or several pages (the default); "v0" for a simple one-page site; "bolt" only if the others clearly don't fit. Keep the same builder for the whole job.
 
@@ -115,7 +89,8 @@ function parseReply(text: string, elements: PageElement[]): Reply | null {
     typeof raw.copyText === "string" && raw.copyText.trim() ? raw.copyText.trim().slice(0, 1500) : null;
   const note = sanitizeText(raw.note, 160) || null;
   const open = isSiteKey(raw.open) ? SITES[raw.open as SiteKey] : null;
-  return { status, instruction, note, elementId, copyText, open, verified: raw.verified !== false };
+  const stageNum = typeof raw.stage === "number" && Number.isInteger(raw.stage) && raw.stage >= 1 && raw.stage <= 12 ? raw.stage : null;
+  return { status, instruction, note, elementId, copyText, open, verified: raw.verified !== false, stage: stageNum };
 }
 
 // Test mode (MOCK_AI=1): fixed answers so the panel can be tried without an AI key.
@@ -131,6 +106,7 @@ function mockReply(goal: string, elements: PageElement[], site: string): Reply {
       copyText: null,
       open: SITES[want],
       verified: false,
+      stage: 1,
     };
   }
   const first = elements.find((e) => e.text || e.label || e.placeholder);
@@ -145,6 +121,7 @@ function mockReply(goal: string, elements: PageElement[], site: string): Reply {
     copyText: `(test mode sample) Something the real AI would write for you to paste: ${goal}`,
     open: null,
     verified: false,
+    stage: 2,
   };
 }
 
@@ -162,26 +139,6 @@ function cacheKey(parts: string[]): string {
 function remember(key: string, reply: Reply) {
   if (answers.size >= CACHE_MAX) answers.delete(answers.keys().next().value as string);
   answers.set(key, { at: Date.now(), reply });
-}
-
-// One short line per element is much smaller than JSON, so the AI answers faster.
-// Example: #26 button "Fork 0" top right
-function describeElements(elements: PageElement[]): string[] {
-  return elements.map((e) => {
-    const words = [...new Set([e.text, e.label, e.placeholder].filter(Boolean))].join(" / ");
-    const kind = e.tag + (e.type && e.type !== e.tag ? `(${e.type})` : "");
-    return `#${e.id} ${kind} ${words ? `"${words}"` : "(no words on it)"}${e.where ? ` ${e.where}` : ""}`;
-  });
-}
-
-// Only the website name is used, never the full address, because addresses can hold private tokens.
-function siteOf(value: unknown): string {
-  if (typeof value !== "string" || !value) return "";
-  try {
-    return new URL(value).hostname.toLowerCase().slice(0, 100);
-  } catch {
-    return /^[a-z0-9.-]{1,100}$/i.test(value) ? value.toLowerCase() : "";
-  }
 }
 
 export async function POST(req: Request) {
@@ -210,6 +167,10 @@ export async function POST(req: Request) {
   const history = Array.isArray(body.history)
     ? body.history.slice(-3).map((h) => sanitizeText(h, 200)).filter(Boolean)
     : [];
+  // The roadmap: just the stage titles, in order (from the chat route). Optional.
+  const roadmap = Array.isArray(body.plan)
+    ? body.plan.slice(0, 10).map((t) => sanitizeText(t, 80)).filter(Boolean)
+    : [];
 
   // A page that loaded but shows nothing to press yet: ask the user to wait.
   // (When the panel could not read the page at all, site is empty and the guide opens a website instead.)
@@ -222,6 +183,7 @@ export async function POST(req: Request) {
       copyText: null,
       open: null,
       verified: true,
+      stage: null,
     } satisfies Reply);
   }
 
@@ -235,7 +197,7 @@ export async function POST(req: Request) {
   }
 
   const lines = describeElements(elements);
-  const key = cacheKey([goal, site, title, afterClick ? "after-click" : "first-look", history.join("|"), ...lines]);
+  const key = cacheKey([goal, site, title, afterClick ? "after-click" : "first-look", roadmap.join("|"), history.join("|"), ...lines]);
   const hit = lost ? undefined : answers.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) {
     console.log(`[next-step] remembered answer site=${site || "(unreadable)"} -> "${hit.reply.instruction.slice(0, 100)}"`);
@@ -249,6 +211,7 @@ export async function POST(req: Request) {
       system: `${RULES}\n\n--- GUIDES ---\n${guides.text}`,
       user: JSON.stringify({
         goal,
+        roadmap: roadmap.length ? roadmap.map((t, i) => `${i + 1}. ${t}`) : undefined,
         lost,
         afterClick,
         page: site ? { site, title } : { site: "(the page could not be read, or it is a blank tab)", title: "" },

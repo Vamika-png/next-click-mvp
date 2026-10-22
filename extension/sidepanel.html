@@ -17,7 +17,7 @@
   <!-- 1. Say what you want -->
   <section id="ask">
     <label for="goal">What do you want to do?</label>
-    <p class="hint">Tell me in your own words. I'll show you the next button to press.</p>
+    <p class="hint">Tell me in your own words. I'll show you the whole path, then the next button to press.</p>
     <textarea id="goal" rows="3" placeholder="A website for my shop, a poster in Canva, a budget in Google Sheets…"></textarea>
     <button id="go" class="big primary">Go</button>
   </section>
@@ -27,9 +27,19 @@
     <button id="change" class="link">Change</button>
   </p>
 
+  <!-- 2. The whole path, from zero to done -->
+  <section id="roadmap" class="roadmap" hidden>
+    <button id="roadHead" class="road-head" type="button" aria-expanded="true">
+      <span class="road-title" id="roadTitle">Your path</span>
+      <span class="road-progress" id="roadProgress"></span>
+      <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <ol id="roadList" class="road-list"></ol>
+  </section>
+
   <ul id="doneList" class="done-list" hidden></ul>
 
-  <!-- 2. The one thing to do right now -->
+  <!-- 3. The one thing to do right now -->
   <section id="now" class="now" hidden>
     <p id="nowLabel" class="now-label" hidden></p>
     <p id="nowText" class="now-text"></p>
@@ -53,6 +63,17 @@
   </section>
 
   <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <!-- 4. Things you asked, and my answers -->
+  <div id="thread" class="thread" hidden aria-live="polite"></div>
+
+  <!-- 5. Ask me anything -->
+  <form id="dock" class="dock" hidden autocomplete="off">
+    <textarea id="chatInput" rows="1" maxlength="500" placeholder="Ask me anything…" aria-label="Ask me anything"></textarea>
+    <button id="chatSend" class="send" type="submit" aria-label="Send">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l15-7-4.5 15-3-6.2z" fill="#fff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </button>
+  </form>
 
   <script src="config.js"></script>
   <script src="sidepanel.js"></script>

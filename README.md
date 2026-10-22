@@ -6,7 +6,14 @@ It works on any normal website. It has written guides for four jobs so far: maki
 
 Two parts:
 - `extension/` the Chrome extension (side panel + arrow)
-- `web/` a small Next.js server with one route, `/api/next-step`, the only place the AI is called
+- `web/` a small Next.js server with two routes, the only places the AI is called: `/api/chat` (the roadmap and your questions) and `/api/next-step` (the next button to press)
+
+## What you see
+
+1. Type a goal ("I want to build a website") and press **Go**.
+2. You first get a **roadmap**: every stage from zero to done (for a website: write your idea, make an account on a builder, build it, improve it, save it on GitHub, put it online, optionally get your own web address). It folds away if you tap its header.
+3. Then the panel walks you through the stages one tiny step at a time. A big card shows ONE thing to press and an arrow points at it. The AI says which stage you are on, so the roadmap ticks itself off.
+4. The **message box at the bottom** lets you ask anything ("what is GitHub?", "what does this button do?"). Answers appear as chat bubbles. If your message changes the path ("use Claude instead", "skip the domain"), the roadmap is rebuilt and guiding carries on.
 
 ## Run it on your computer
 
