@@ -71,22 +71,6 @@ function clearPointer() {
     .catch(() => {});
 }
 
-function rememberGoal(goal) {
-  try {
-    localStorage.setItem(GOAL_KEY, goal);
-  } catch (e) {
-    /* fine without storage */
-  }
-}
-
-function recallGoal() {
-  try {
-    return localStorage.getItem(GOAL_KEY) || "";
-  } catch (e) {
-    return "";
-  }
-}
-
 // ---------- the one card ----------
 
 const canSpeak = typeof speechSynthesis !== "undefined" && typeof SpeechSynthesisUtterance !== "undefined";
@@ -392,7 +376,6 @@ function go() {
     return;
   }
   state.goal = goal;
-  rememberGoal(goal);
   ui.goalText.textContent = goal;
   ui.ask.hidden = true;
   ui.goalLine.hidden = false;
@@ -455,4 +438,10 @@ chrome.tabs.onActivated.addListener((info) => {
   schedule(300);
 });
 
-ui.goal.value = recallGoal();
+// The box always starts empty. (Older versions saved your last goal; clear that old copy.)
+try {
+  localStorage.removeItem(GOAL_KEY);
+} catch (e) {
+  /* fine without storage */
+}
+ui.goal.value = "";
