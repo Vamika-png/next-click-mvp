@@ -10,6 +10,18 @@ Two parts:
 
 Gemini's free tier has daily and per-minute limits for each model, and it can be slow at busy times. The server skips a model that says it is used up for the day, asks again if one is slow, and shows a friendly "I'm a little busy" message if everything is full. For many users, switch the key to a paid plan.
 
+## Hackathon submission
+
+- **Live site and download:** https://web-topaz-theta-65.vercel.app (the Download button gives the extension; install steps are on the page)
+- **Source code:** https://github.com/Vamika-png/next-click-mvp
+- **What it is:** a Chrome side panel for people who know nothing about computers. You type a goal ("I want to build a website"), get a roadmap from zero to done, then one tiny step at a time with an arrow on the exact button to press. You can ask it anything in the message box. It only points; it never clicks or types for you.
+
+**Try it in 2 minutes:** download the zip from the live site, unzip it, open `chrome://extensions`, turn on Developer mode, press **Load unpacked** and choose the unzipped folder. Open any website, click the Next Click icon, type a goal and press **Go**. It works best on the first-app journey (Lovable, GitHub, Vercel), Canva, Google Sheets and Zapier or Make; for other sites it still helps and says "I'm not 100% sure".
+
+**Honest limits:** Chrome only (not desktop apps); the live AI runs on Gemini's free tier, which has daily limits and can be slow, so you may see "I'm a little busy" and need to press Try again; the guides for each tool were written from general knowledge, not checked against every screen.
+
+**To rebuild the download after changing the extension:** `powershell -ExecutionPolicy Bypass -File scripts\build-extension-zip.ps1`, then commit and push.
+
 ## What you see
 
 1. Type a goal ("I want to build a website") and press **Go**.

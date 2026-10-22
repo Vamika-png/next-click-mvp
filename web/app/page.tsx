@@ -84,7 +84,10 @@ export default function Home() {
           </ul>
         </section>
 
-        <footer>Next Click is an early prototype made for a hackathon. Some answers may be wrong. It tells you when it is not sure.</footer>
+        <footer>
+          Next Click is an early prototype made for a hackathon. Some answers may be wrong. It tells you when it is not sure.{" "}
+          <a href="https://github.com/Vamika-png/next-click-mvp">Source code on GitHub</a>.
+        </footer>
       </div>
     </>
   );
