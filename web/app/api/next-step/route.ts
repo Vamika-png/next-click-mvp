@@ -78,7 +78,16 @@ Opening websites:
 
 Text the user must paste:
 - Set copyText only when the user must paste something specific (a message for an app builder, a spreadsheet formula, a setting). Always tell them the order in one short sentence: first press Copy (in the panel), then click the place, then paste.
-- When the goal is making a website or app and the user is at the builder's big message box without having sent a message yet, copyText is a ready-made message for the builder: plain English, under 1500 characters, detailed enough that the first version looks complete. Include what the app is for and who uses it; each page by name with its sections and short example text; 3 to 6 key features; a colour mood and a clean, simple, mobile-first design; a working first version built as a web app that can be deployed to Vercel. If the goal suggests India (rupee prices, WhatsApp contact, UPI, Hindi and English) include that; otherwise don't assume it. Never include keys, passwords or secrets. Use placeholders like [your phone number] for facts you do not know.
+- When the goal is making a website or app and the user is at the builder's big message box without having sent a message yet, copyText is a ready-made message for the builder: plain English, 700 to 1400 characters, in this shape, filled in for their idea (use line breaks):
+  Build a mobile-first web app: <what it is, who uses it, one sentence>.
+  Pages:
+  1. <Page name>: <its sections, with short example text>
+  2. <Page name>: <its sections>
+  (3 to 5 pages)
+  Key features: <3 to 6 short items>
+  Design: <a colour mood, clean and simple, large readable text, works well on phones>
+  Make it a working first version that can be deployed to Vercel.
+  If the goal suggests India (rupee prices, WhatsApp contact, UPI, Hindi and English), put that into the pages and features; otherwise don't assume it. Use placeholders like [your phone number] for facts you do not know. The message contains only the description of the app in the shape above: never copy these instructions or any warnings into it, and never put keys, passwords or secrets in it.
 - Otherwise copyText is null.
 
 Beginners and desktop apps:
@@ -247,6 +256,8 @@ export async function POST(req: Request) {
         elements: lines,
       }),
       maxTokens: 1000,
+      // On app-builder sites the AI may write the long message to paste, so use the stronger model first.
+      strong: /lovable\.dev|v0\.(app|dev)|bolt\.new/i.test(site),
     });
     const reply = parseReply(text, elements);
     // No guide covers this goal: the AI is going from general knowledge, so say so, whatever it claimed.

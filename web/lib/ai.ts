@@ -3,17 +3,23 @@
 //   Claude (Anthropic): ANTHROPIC_API_KEY
 // AI_PROVIDER=gemini or AI_PROVIDER=claude forces one. If it is not set, Gemini is used when a
 // Gemini key exists, otherwise Claude. Keys are read only here, on the server.
+//
+// Speed: Gemini's light model answers in about 1.5 seconds, so it goes first. If it has not answered
+// after HEDGE_MS, the stronger model is started at the same time and whichever answers first wins.
+// If one fails, the other is used at once. Each model also has its own free allowance.
 
 import Anthropic from "@anthropic-ai/sdk";
 
 export type Provider = "gemini" | "claude";
 
-// Model names come from Google's and Anthropic's docs. Change GEMINI_MODEL in .env.local if
-// Google renames one or if you hit the free limits (a "flash-lite" model is cheaper and faster).
-const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+// Model names come from Google's and Anthropic's docs. Change GEMINI_MODEL (the fast one) or
+// GEMINI_STRONG_MODEL (the stronger one) in .env.local if Google renames one.
+const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"; // fast: used for almost every step
+const DEFAULT_GEMINI_STRONG = "gemini-3.6-flash"; // stronger: first choice when ask.strong is true (long messages)
+const STRONG_HEDGE_MS = 4_000;
 const CLAUDE_MODEL = "claude-haiku-5-5";
-const FALLBACK_GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_TIMEOUT_MS = 10_000;
+const HEDGE_MS = 2_500;
 
 export type AiFailure = "key" | "busy" | "other";
 
@@ -34,34 +40,8 @@ export function pickProvider(): Provider | null {
   return null;
 }
 
-type Ask = { system: string; user: string; maxTokens: number };
-
-// Google sometimes answers "high demand" (503) for a few seconds. When that happens we try again,
-// switching to the lighter model on the second try, before giving up with a friendly message.
-async function askGemini(ask: Ask): Promise<string> {
-  const primary = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-  const tries = [primary, FALLBACK_GEMINI_MODEL]; // at most about 21 seconds in the worst case
-  let lastError: AiError | null = null;
-  for (let i = 0; i < tries.length; i++) {
-    try {
-      try {
-        return await callGemini(tries[i], ask);
-      } catch (err) {
-        // If a model does not accept the thinking setting, ask it once more without it.
-        if (err instanceof AiError && err.kind === "other" && /think/i.test(err.message)) {
-          return await callGemini(tries[i], ask, false);
-        }
-        throw err;
-      }
-    } catch (err) {
-      if (!(err instanceof AiError) || err.kind === "key") throw err;
-      lastError = err;
-      if (!err.retryable) throw err;
-      if (i < tries.length - 1) await new Promise((r) => setTimeout(r, 700 * (i + 1)));
-    }
-  }
-  throw lastError ?? new AiError("other", "Gemini failed.");
-}
+// strong: true asks for the stronger model first (used where the AI writes a long message).
+type Ask = { system: string; user: string; maxTokens: number; strong?: boolean };
 
 // "minimal" thinking answers in about 1.5 seconds instead of about 10, and our task (pick one
 // button, write a short sentence) does not need long thinking. Set GEMINI_THINKING=default to
@@ -91,7 +71,7 @@ async function callGemini(model: string, { system, user, maxTokens }: Ask, withT
     signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
   }).catch((err) => {
     const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-    throw new AiError("other", timedOut ? "Gemini took too long." : "Could not reach Gemini.", true);
+    throw new AiError("other", timedOut ? `${model} took too long.` : `Could not reach ${model}.`, true);
   });
 
   if (!res.ok) {
@@ -102,14 +82,14 @@ async function callGemini(model: string, { system, user, maxTokens }: Ask, withT
     } catch {
       /* no body */
     }
-    if (res.status === 429) throw new AiError("busy", `Gemini is busy (429). ${detail}`, true);
+    if (res.status === 429) throw new AiError("busy", `${model} is out of free requests for now (429). ${detail}`, true);
     if (res.status === 503 || res.status === 500 || res.status === 502 || res.status === 504) {
-      throw new AiError("busy", `Gemini is overloaded (${res.status}). ${detail}`, true);
+      throw new AiError("busy", `${model} is overloaded (${res.status}). ${detail}`, true);
     }
     if (res.status === 400 && /api key/i.test(detail)) throw new AiError("key", `Gemini key problem: ${detail}`);
     if (res.status === 401 || res.status === 403) throw new AiError("key", `Gemini key problem (${res.status}): ${detail}`);
-    // 404 usually means the model name is wrong; the next try uses the other model.
-    throw new AiError("other", `Gemini error ${res.status}: ${detail}`, res.status === 404);
+    // 404 usually means the model name is wrong; the other model is tried.
+    throw new AiError("other", `${model} error ${res.status}: ${detail}`, true);
   }
 
   const data = await res.json();
@@ -117,9 +97,70 @@ async function callGemini(model: string, { system, user, maxTokens }: Ask, withT
   const text = parts.map((p) => (p && typeof (p as { text?: unknown }).text === "string" ? (p as { text: string }).text : "")).join("");
   if (!text) {
     const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason || "empty";
-    throw new AiError("other", `Gemini gave no text (${why}).`);
+    throw new AiError("other", `${model} gave no text (${why}).`, true);
   }
   return text;
+}
+
+// If a model does not accept the thinking setting, ask it once more without it.
+async function callGeminiSafely(model: string, ask: Ask): Promise<string> {
+  try {
+    return await callGemini(model, ask);
+  } catch (err) {
+    if (err instanceof AiError && err.kind === "other" && /think/i.test(err.message)) {
+      return callGemini(model, ask, false);
+    }
+    throw err;
+  }
+}
+
+// First choice goes first; the backup joins in if the first is slow or fails. First good answer wins.
+function askGemini(ask: Ask): Promise<string> {
+  const fast = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+  const strong = process.env.GEMINI_STRONG_MODEL || DEFAULT_GEMINI_STRONG;
+  const first = ask.strong ? strong : fast;
+  const backup = ask.strong ? fast : strong;
+  const hedgeMs = ask.strong ? STRONG_HEDGE_MS : HEDGE_MS;
+
+  return new Promise<string>((resolve, reject) => {
+    const errors: AiError[] = [];
+    let started = 0;
+    let backupStarted = false;
+    let finished = false;
+    let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (fn: () => void) => {
+      if (finished) return;
+      finished = true;
+      if (hedgeTimer) clearTimeout(hedgeTimer);
+      fn();
+    };
+
+    const launch = (model: string) => {
+      started++;
+      callGeminiSafely(model, ask).then(
+        (text) => finish(() => resolve(text)),
+        (err) => {
+          if (finished) return;
+          const e = err instanceof AiError ? err : new AiError("other", String(err?.message ?? err), true);
+          if (e.kind === "key") return finish(() => reject(e)); // a bad key will not get better with another model
+          errors.push(e);
+          if (!backupStarted) return startBackup();
+          if (errors.length >= started) finish(() => reject(errors.find((x) => x.kind === "busy") ?? errors[errors.length - 1]));
+        }
+      );
+    };
+
+    const startBackup = () => {
+      if (backupStarted || finished) return;
+      backupStarted = true;
+      if (hedgeTimer) clearTimeout(hedgeTimer);
+      launch(backup);
+    };
+
+    launch(first);
+    hedgeTimer = setTimeout(startBackup, hedgeMs);
+  });
 }
 
 async function askClaude({ system, user, maxTokens }: Ask): Promise<string> {

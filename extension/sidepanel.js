@@ -422,11 +422,15 @@ chrome.runtime.onMessage.addListener((msg) => {
     // Answer the click at once: the old step is finished, the next one is on its way.
     showNow({ label: `Step ${state.steps}`, text: "Nice! Finding your next step", loading: true });
     setStatus("");
-    schedule(500);
+    schedule(0); // no waiting: the page itself waits until it has settled before it is read
   } else if (msg.kind === "page-changed") {
     // The thing we pointed at disappeared. Most likely you used it (a menu closed, a new page opened).
     if (state.running && state.steps > 0) state.afterClick = true;
-    schedule(300);
+    schedule(0);
+  } else if (msg.kind === "content-changed") {
+    // The page changed a lot while the thing we pointed at is still there (e.g. a new section opened).
+    // We don't know you pressed anything, so just look again and let the AI judge.
+    schedule(100);
   }
 });
 chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
@@ -436,12 +440,12 @@ chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
   if (newPage || loaded) {
     // You landed on a different page after our last instruction: treat the step as done.
     if (state.running && state.steps > 0) state.afterClick = true;
-    schedule(newPage && !loaded ? 600 : 300);
+    schedule(newPage && !loaded ? 300 : 100);
   }
 });
 chrome.tabs.onActivated.addListener((info) => {
   if (info && info.tabId === state.lastTabId) return; // same tab as before: nothing to do
-  schedule(300);
+  schedule(100);
 });
 
 // The box always starts empty. (Older versions saved your last goal; clear that old copy.)

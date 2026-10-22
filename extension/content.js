@@ -13,6 +13,8 @@
   let observer = null;
   let watchTimer = 0;
   let goneNotified = false; // we already told the panel that the thing we pointed at is gone
+  let changeCount = 0; // how many parts of the page were added or removed in the latest burst
+  let contentNotified = false; // we already told the panel about a big change for this arrow
 
   const SELECTOR = [
     "a[href]",
@@ -238,14 +240,23 @@
 
   function watchTarget() {
     if (observer) observer.disconnect();
-    observer = new MutationObserver(() => {
+    changeCount = 0;
+    contentNotified = false;
+    observer = new MutationObserver((records) => {
+      for (const r of records) changeCount += r.addedNodes.length + r.removedNodes.length;
       clearTimeout(watchTimer);
       watchTimer = setTimeout(() => {
         if (target && !target.isConnected && !goneNotified) {
           goneNotified = true;
           notify("page-changed");
+        } else if (target && changeCount >= 40 && !contentNotified) {
+          // A big change settled and our target is still here: tell the panel once, so a step that
+          // changed the page without us seeing the press (inside a frame, say) is not left stale.
+          contentNotified = true;
+          notify("content-changed");
         }
-      }, 200);
+        changeCount = 0;
+      }, 250);
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
@@ -278,7 +289,7 @@
 
   // Pages often keep drawing for a moment after they "finish" loading. Instead of waiting a fixed
   // time, wait until the page has been still for a short while (never longer than maxMs).
-  function waitForQuiet(quietMs = 350, maxMs = 2500) {
+  function waitForQuiet(quietMs = 220, maxMs = 1500) {
     return new Promise((resolve) => {
       let finished = false;
       let quietTimer = 0;

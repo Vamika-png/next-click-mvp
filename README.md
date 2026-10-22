@@ -27,7 +27,7 @@ Gemini (Google) is the default; Claude (Anthropic) also works.
 1. Create a key at **aistudio.google.com** (Get API key). Check its free limits there.
 2. In `web/.env.local` paste the key after `GEMINI_API_KEY=` and change `MOCK_AI=1` to `MOCK_AI=0`. Save, then restart `npm run dev`.
 3. To use Claude instead: paste a key after `ANTHROPIC_API_KEY=` and set `AI_PROVIDER=claude`.
-4. If Google renames the model or you hit the free limits, set `GEMINI_MODEL=` in the same file (a "flash-lite" model is cheaper and faster).
+4. Two Gemini models are used. A fast light one (`GEMINI_MODEL`, default `gemini-3.5-flash-lite`) answers almost every step in about a second and a half. A stronger one (`GEMINI_STRONG_MODEL`, default `gemini-3.6-flash`) goes first on app-builder sites, where the AI writes the long message, and steps in whenever the fast one is slow, busy or out of free requests. If Google renames a model, set the name in the same file. Each model has its own free allowance.
 5. The key stays on the server. It is never in the extension, and `.env*` files are git-ignored.
 
 ## Deploy the server to Vercel
