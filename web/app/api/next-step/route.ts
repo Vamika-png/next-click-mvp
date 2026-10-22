@@ -38,6 +38,8 @@ Help with ANY goal. Below you are given short written guides for some tools. If 
 
 Work out where they are from the page (site, title, elements) and your previous instructions. If the goal is only part of a longer job, do only that part.
 
+You keep guiding them step after step until the goal is done. When "afterClick" is true, the user has just pressed the thing you pointed at, so your previous instruction is DONE: give the NEXT step. Never repeat your previous instruction. If the page looks the same as before, say in the note what should happen next, and point at whatever comes next (for example a menu that just opened, or the next field). When "afterClick" is false you are looking at the page for the first time or it changed on its own: give the step that fits what you see now.
+
 Answer with ONE JSON object and nothing else:
 {"status":"continue"|"done"|"stuck","instruction":"<MAX 15 words: the action and where it is>","note":"<MAX 20 words: why, or what will happen next, or null>","elementId":<number from the list or null>,"copyText":"<text to paste or null>","open":${SITE_KEYS.map((k) => `"${k}"`).join("|")}|null,"verified":true|false}
 
@@ -171,6 +173,7 @@ export async function POST(req: Request) {
   const site = siteOf(body.site);
   const title = sanitizeText(body.title, 150);
   const lost = body.lost === true;
+  const afterClick = body.afterClick === true; // the user just pressed what we pointed at
   const history = Array.isArray(body.history)
     ? body.history.slice(-3).map((h) => sanitizeText(h, 200)).filter(Boolean)
     : [];
@@ -199,7 +202,7 @@ export async function POST(req: Request) {
   }
 
   const lines = describeElements(elements);
-  const key = cacheKey([goal, site, title, history.join("|"), ...lines]);
+  const key = cacheKey([goal, site, title, afterClick ? "after-click" : "first-look", history.join("|"), ...lines]);
   const hit = lost ? undefined : answers.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) {
     console.log(`[next-step] remembered answer site=${site || "(unreadable)"} -> "${hit.reply.instruction.slice(0, 100)}"`);
@@ -213,6 +216,7 @@ export async function POST(req: Request) {
       user: JSON.stringify({
         goal,
         lost,
+        afterClick,
         page: site ? { site, title } : { site: "(the page could not be read, or it is a blank tab)", title: "" },
         previousInstructions: history,
         elements: lines,

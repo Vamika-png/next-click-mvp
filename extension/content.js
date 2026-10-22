@@ -139,22 +139,22 @@
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `
       <style>
-        .box{position:fixed;border:3px solid #ff5a1f;border-radius:12px;pointer-events:none;
-             background:rgba(255,90,31,.08);animation:pulse 1.4s ease-in-out infinite}
+        .box{position:fixed;border:3px solid #ff5c39;border-radius:12px;pointer-events:none;
+             background:rgba(255,92,57,.08);animation:pulse 1.4s ease-in-out infinite}
         .ptr{position:fixed;left:0;top:0;pointer-events:none;transition:transform .5s cubic-bezier(.2,.8,.2,1)}
         .ptr svg{display:block;width:40px;height:40px;filter:drop-shadow(0 4px 6px rgba(0,0,0,.35));
                  animation:nudge 1s ease-in-out infinite}
         .tag{position:absolute;left:30px;top:30px;white-space:nowrap;padding:5px 12px;border-radius:999px;
-             background:linear-gradient(135deg,#ff8a3d,#ff5a1f);color:#fff;font:700 13px/1.2 system-ui,sans-serif;
-             box-shadow:0 4px 12px rgba(255,90,31,.45)}
-        @keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(255,90,31,.35),0 0 18px rgba(255,90,31,.25)}
-                         50%{box-shadow:0 0 0 9px rgba(255,90,31,.12),0 0 28px rgba(255,90,31,.35)}}
+             background:linear-gradient(135deg,#ff8a5b,#ff5c39);color:#fff;font:700 13px/1.2 system-ui,sans-serif;
+             box-shadow:0 4px 12px rgba(255,92,57,.45)}
+        @keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(255,92,57,.35),0 0 18px rgba(255,92,57,.25)}
+                         50%{box-shadow:0 0 0 9px rgba(255,92,57,.12),0 0 28px rgba(255,92,57,.35)}}
         @keyframes nudge{0%,100%{transform:translate(0,0)}50%{transform:translate(-5px,-5px)}}
         @media (prefers-reduced-motion:reduce){.box,.ptr svg{animation:none}}
       </style>
       <div class="box"></div>
       <div class="ptr">
-        <svg viewBox="0 0 24 24"><path d="M3 2l7.5 19.5 3.2-8.3L22 10z" fill="#ff5a1f" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M3 2l7.5 19.5 3.2-8.3L22 10z" fill="#ff5c39" stroke="#fff" stroke-width="1.7" stroke-linejoin="round"/></svg>
         <span class="tag">Press here</span>
       </div>`;
     document.documentElement.appendChild(host);
@@ -202,7 +202,18 @@
     }
   }
 
-  function onUserAction() {
+  // Only a press on the thing we pointed at counts as "you did it". A click anywhere else
+  // (scrolling around, reading) does not move the guide forward.
+  function onUserAction(event) {
+    if (!target) return;
+    const hit = event && event.target;
+    let pressed = false;
+    if (hit && hit.nodeType === 1) {
+      const clickable = hit.closest ? hit.closest("a,button,summary,label,[role=button],[role=link],[role=menuitem],[role=tab]") : null;
+      pressed = target === hit || target.contains(hit) || (!!clickable && (clickable === target || clickable.contains(target)));
+    }
+    if (event && event.type === "submit") pressed = !!(hit && hit.contains && hit.contains(target));
+    if (!pressed) return;
     clear(); // take the old arrow away at once, so it never points at something that is gone
     notify("user-acted");
   }

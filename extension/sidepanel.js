@@ -15,6 +15,7 @@ const ui = {
   go: $("go"),
   goalLine: $("goalLine"),
   goalText: $("goalText"),
+  doneList: $("doneList"),
   change: $("change"),
   now: $("now"),
   nowLabel: $("nowLabel"),
@@ -42,6 +43,10 @@ const state = {
   loadWaits: 0,
   timer: 0,
   runId: 0,
+  lastStatus: "",
+  afterClick: false, // true when the next look follows a real click by you
+  lastUrl: "", // kept only in this panel, never sent anywhere
+  lastTabId: null,
 };
 
 // ---------- small helpers ----------
@@ -124,6 +129,18 @@ function showNow({ text, note, primary, copyText, problem, label, loading }) {
   ui.hear.hidden = !canSpeak || !text;
 }
 
+// A faded list of the last steps you already did, so you can see you are moving forward.
+function renderDone() {
+  const before = state.history.slice(0, -1).slice(-2);
+  ui.doneList.textContent = "";
+  before.forEach((text) => {
+    const li = document.createElement("li");
+    li.textContent = text;
+    ui.doneList.appendChild(li);
+  });
+  ui.doneList.hidden = before.length === 0;
+}
+
 function showProblem(text) {
   state.running = false;
   showNow({ text, problem: true, primary: { label: "Try again", onClick: tryAgain } });
@@ -195,6 +212,10 @@ function beginRun(delayMs) {
   state.lastKey = "";
   state.repeats = 0;
   state.loadWaits = 0;
+  state.afterClick = false;
+  state.lastUrl = "";
+  state.lastTabId = null;
+  renderDone();
   state.runId += 1;
   state.running = true;
   if (delayMs > 0) schedule(delayMs);
@@ -230,7 +251,7 @@ function openSite(site) {
 // Reads the current tab. A blank tab or a page we may not read is not an error:
 // the server just hears "nothing to see" and tells us which website to open.
 async function readPage(tab) {
-  const nothing = { site: "", title: "", elements: [] };
+  const nothing = { site: "", title: "", elements: [], url: "" };
   if (!tab || tab.id === undefined) return nothing;
   if (tab.url !== undefined && !isReadableUrl(tab.url)) return nothing;
   try {
@@ -243,7 +264,7 @@ async function readPage(tab) {
     } catch (e) {
       site = "";
     }
-    return { site, title: scan.title, elements: scan.elements };
+    return { site, title: scan.title, elements: scan.elements, url: scan.url || "" };
   } catch (e) {
     return nothing;
   }
@@ -257,7 +278,9 @@ async function look() {
   }
   const runId = state.runId;
   const lost = state.lostNext;
+  const afterClick = state.afterClick; // you just pressed something: the AI must give the NEXT step
   state.lostNext = false;
+  state.afterClick = false;
   state.busy = true;
   state.pending = false;
   try {
@@ -273,10 +296,13 @@ async function look() {
     }
 
     const page = await readPage(tab);
+    state.lastUrl = page.url;
+    state.lastTabId = tab ? tab.id : null;
     setStatus("Thinking…");
     const reply = await ask({
       goal: state.goal,
       lost,
+      afterClick,
       site: page.site,
       title: page.title,
       elements: page.elements,
@@ -285,12 +311,22 @@ async function look() {
     if (runId !== state.runId || !state.running) return; // you moved on meanwhile
     if (!validReply(reply)) throw new Error("I got mixed up. Please press \"Try again\".");
 
-    // Same instruction again and again means the page didn't change after your click.
     const key = reply.instruction + "|" + reply.elementId;
-    state.repeats = key === state.lastKey ? state.repeats + 1 : 0;
+    const same = key === state.lastKey;
+
+    // We looked again by ourselves (not after your click) and nothing new came back:
+    // leave the card and the arrow exactly as they are. Do not count it, do not flicker.
+    if (same && !afterClick && !lost && reply.status === "continue") {
+      setStatus(state.lastStatus || "");
+      return;
+    }
+
+    // Only a repeat right AFTER your click means "the page didn't change".
+    state.repeats = same && afterClick ? state.repeats + 1 : 0;
     state.lastKey = key;
     state.steps += 1;
     state.history.push(reply.instruction);
+    renderDone();
 
     let pointed = false;
     if (reply.elementId !== null && tab && tab.id !== undefined) {
@@ -330,11 +366,12 @@ async function look() {
       setStatus("We have done a lot of steps. I will wait here. Press \"I'm lost\" when you want me again.");
     } else if (state.repeats >= 2) {
       state.running = false;
-      setStatus("Nothing changed on the page. Try what I said, then press \"I'm lost\" if you need me.");
+      setStatus("It looks like nothing changed after you pressed it. Press \"I'm lost\" and I'll look again.");
     } else if (reply.open) {
       setStatus("");
     } else {
-      setStatus(pointed ? "Press where the orange arrow points. I will look again by myself." : "I will look again by myself when the page changes.");
+      state.lastStatus = pointed ? "Press where the arrow points. I'll see when you do." : "I'll see when you do it.";
+      setStatus(state.lastStatus);
     }
   } catch (err) {
     showProblem(err.message || "Something went wrong. Please press \"Try again\".");
@@ -391,20 +428,31 @@ ui.copyBtn.addEventListener("click", copyText);
 ui.hear.addEventListener("click", speak);
 ui.lost.addEventListener("click", imLost);
 
-// The page tells us when you pressed something or when the thing we pointed at disappeared.
+// We only look again for a real reason: you pressed the thing we pointed at, that thing disappeared,
+// or you landed on a different page. Small background updates are ignored on purpose.
+// (The page itself waits until it stops changing before it is read, so these delays can be short.)
 chrome.runtime.onMessage.addListener((msg) => {
-  // The page itself waits until it stops changing before it is read, so these delays can be short.
   if (!msg || msg.type !== "nc-event") return;
-  if (msg.kind === "user-acted" && state.running) {
+  if (msg.kind === "user-acted") {
+    if (!state.running) return;
+    state.afterClick = true; // tells the AI: they did the last step, give the NEXT one
     // Answer the click at once: the old step is finished, the next one is on its way.
     showNow({ label: `Step ${state.steps}`, text: "Nice! Finding your next step", loading: true });
     setStatus("");
+    schedule(500);
+  } else if (msg.kind === "page-changed") {
+    schedule(300);
   }
-  schedule(msg.kind === "user-acted" ? 500 : 300);
 });
 chrome.tabs.onUpdated.addListener((_tabId, info, tab) => {
-  if (info.status === "complete" && tab.active) schedule(300);
+  if (!tab || !tab.active) return;
+  const newPage = info.url && info.url !== state.lastUrl; // address changed (also for in-page navigation)
+  const loaded = info.status === "complete" && tab.url && tab.url !== state.lastUrl;
+  if (newPage || loaded) schedule(newPage && !loaded ? 600 : 300);
 });
-chrome.tabs.onActivated.addListener(() => schedule(300));
+chrome.tabs.onActivated.addListener((info) => {
+  if (info && info.tabId === state.lastTabId) return; // same tab as before: nothing to do
+  schedule(300);
+});
 
 ui.goal.value = recallGoal();
