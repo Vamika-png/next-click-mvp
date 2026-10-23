@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 
 type PlanStep = { title: string; detail: string };
 type Plan = { title: string; steps: PlanStep[] };
-type Reply = { reply: string; plan: Plan | null };
+type Reply = { reply: string; plan: Plan | null; prompt: string | null };
 
 export function OPTIONS() {
   return preflight();
@@ -25,8 +25,10 @@ You do two jobs.
 
 Example, for "build a website": 1. Write down your idea. 2. Make an account on an app builder (Lovable). 3. Paste your message and get a first version. 4. Improve it by chatting. 5. Save it on GitHub. 6. Put it on the internet with Vercel. 7. Get your own web address (optional).
 
+3) MESSAGE FOR THE ROBOT. The user can keep chatting back and forth and add details about what they want ("it is a sneaker brand", "make it dark", "add a shop page"). Whenever their message adds or changes what they want to make, also write "prompt": ONE complete, ready-to-paste message for an AI app builder (like Lovable) or chat AI (like Claude), built from the whole conversation, so they get the best result. Write it in first person ("Build me a website for..."), 60 to 180 words, with the idea, who it is for, the pages or parts, the look and feel, and what to do first. Do not invent facts they did not say; where something is missing, choose a sensible simple default. No passwords or keys. In "reply", explain in two or three simple sentences what this message is and where to paste it (for example: "I turned your idea into one message for the robot builder. Press Copy and paste it into the big box on Lovable. It will build your sneaker website."). If the message adds nothing about what they want to make (a plain question), use "prompt": null.
+
 Answer with ONE JSON object and nothing else:
-{"reply":"<your answer, or one or two warm sentences introducing the roadmap>","plan":null OR {"title":"<max 6 words>","steps":[{"title":"<max 6 words>","detail":"<max 20 words>"}]}}
+{"reply":"<your answer, or one or two warm sentences introducing the roadmap>","plan":null OR {"title":"<max 6 words>","steps":[{"title":"<max 6 words>","detail":"<max 20 words>"}]},"prompt":null OR "<the ready-to-paste message>"}
 
 Rules:
 - If "start" is true you MUST return a roadmap for the goal. Otherwise return "plan": null unless the message really changes the path or asks for the roadmap again.
@@ -61,8 +63,9 @@ function parseReply(text: string): Reply | null {
   if (!raw) return null;
   const reply = cleanMultiline(raw.reply, 900);
   const plan = parsePlan(raw.plan);
-  if (!reply && !plan) return null;
-  return { reply: reply || "Here is your path.", plan };
+  const prompt = cleanMultiline(raw.prompt, 1600);
+  if (!reply && !plan && !prompt) return null;
+  return { reply: reply || "Here is your path.", plan, prompt: prompt.length >= 30 ? prompt : null };
 }
 
 // Test mode (MOCK_AI=1): fixed answers so the panel can be tried without an AI key.
@@ -70,6 +73,7 @@ function mockReply(message: string, start: boolean): Reply {
   if (start) {
     return {
       reply: "(test mode) Here is a sample path from zero to done. I will walk you through each step.",
+      prompt: null,
       plan: {
         title: "Your path",
         steps: [
@@ -82,7 +86,7 @@ function mockReply(message: string, start: boolean): Reply {
       },
     };
   }
-  return { reply: `(test mode) You asked: "${message.slice(0, 120)}". The real AI will answer this in simple words.`, plan: null };
+  return { reply: `(test mode) You asked: "${message.slice(0, 120)}". The real AI will answer this in simple words.`, plan: null, prompt: /sneaker|shop|brand|website/i.test(message) ? "Build me a simple website for my idea. (test mode sample message)" : null };
 }
 
 // Remember roadmaps for the same goal for a while, so a repeat is instant and uses no quota.
@@ -116,7 +120,7 @@ export async function POST(req: Request) {
   const currentPlan = Array.isArray(body.plan) ? body.plan.slice(0, 10).map((t) => sanitizeText(t, 80)).filter(Boolean) : [];
   const thread = Array.isArray(body.thread)
     ? body.thread
-        .slice(-6)
+        .slice(-10)
         .map((m) => {
           const r = m && typeof m === "object" ? (m as Record<string, unknown>) : {};
           return { who: r.role === "user" ? "user" : "helper", text: sanitizeText(r.text, 400) };

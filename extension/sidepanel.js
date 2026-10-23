@@ -269,6 +269,39 @@ function bubble(role, text, extra = "") {
   return b;
 }
 
+// A ready-to-paste message for the robot builder, with its own Copy button.
+function promptBubble(text) {
+  const b = document.createElement("div");
+  b.className = "bubble ai promptbox";
+  const label = document.createElement("div");
+  label.className = "promptlabel";
+  label.textContent = "Your message for the robot";
+  const body = document.createElement("div");
+  body.className = "prompttext";
+  body.textContent = text;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "promptcopy";
+  btn.textContent = "Copy";
+  btn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand("copy");
+    }
+    btn.textContent = "Copied ✓";
+  });
+  b.append(label, body, btn);
+  ui.thread.appendChild(b);
+  ui.thread.hidden = false;
+  if (b.scrollIntoView) b.scrollIntoView({ block: "end", behavior: "smooth" });
+}
+
 function remember(role, text) {
   state.thread.push({ role, text });
   if (state.thread.length > 12) state.thread.shift();
@@ -289,7 +322,7 @@ async function sendChat() {
   }
   if (state.chatBusy) return;
   state.chatBusy = true;
-  const earlier = state.thread.slice(-6);
+  const earlier = state.thread.slice(-10);
   ui.chatInput.value = "";
   autosizeChat();
   bubble("user", text);
@@ -313,6 +346,7 @@ async function sendChat() {
     if (!res || typeof res.reply !== "string") throw new Error("I got mixed up. Please send that again.");
     bubble("ai", res.reply);
     remember("ai", res.reply);
+    if (typeof res.prompt === "string" && res.prompt.trim().length >= 30) promptBubble(res.prompt.trim());
     if (validRoadmap(res.plan)) {
       // Your message changed the path: show the new roadmap and carry on from its first stage.
       setPlan(res.plan, 1);
