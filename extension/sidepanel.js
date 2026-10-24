@@ -40,6 +40,11 @@ const ui = {
   dock: $("dock"),
   chatInput: $("chatInput"),
   chatSend: $("chatSend"),
+  toolCard: $("toolCard"),
+  toolBadge: $("toolBadge"),
+  toolName: $("toolName"),
+  toolWhy: $("toolWhy"),
+  toolOpen: $("toolOpen"),
 };
 
 const state = {
@@ -64,6 +69,12 @@ const state = {
   failed: [], // instructions you followed that changed nothing on the page
   failedUrl: "",
   autoRetried: false, // we already tried "another way" once for the current stuck spot
+  goalFull: "", // your goal plus the details you gave in the chat
+  tool: null, // the best tool for this job: { key, label, url, why }
+  awaitingDetails: false, // we asked what you want to make; your next chat message is the answer
+  pointedSig: "", // what the arrow points at right now (button name only)
+  pressed: [], // what you already pressed on this page: never point at it again
+  pressedUrl: "",
   lastSite: "", // what the latest look saw, so a question can be answered about the same screen
   lastTitle: "",
   lastElements: [],
@@ -275,7 +286,7 @@ function promptBubble(text) {
   b.className = "bubble ai promptbox";
   const label = document.createElement("div");
   label.className = "promptlabel";
-  label.textContent = "Your message for the robot";
+  label.textContent = "Your prompt — paste it into the builder";
   const body = document.createElement("div");
   body.className = "prompttext";
   body.textContent = text;
@@ -302,6 +313,49 @@ function promptBubble(text) {
   if (b.scrollIntoView) b.scrollIntoView({ block: "end", behavior: "smooth" });
 }
 
+// ---------- the best tool, and what to do with the helper's answer ----------
+
+function setTool(tool) {
+  const ok = tool && typeof tool.key === "string" && typeof tool.label === "string" && /^https:\/\//.test(tool.url || "");
+  state.tool = ok ? tool : null;
+  ui.toolCard.hidden = !state.tool;
+  if (!state.tool) return;
+  ui.toolBadge.textContent = state.tool.label.charAt(0).toUpperCase();
+  ui.toolName.textContent = state.tool.label;
+  ui.toolWhy.textContent = state.tool.why || "";
+}
+
+// What you told me so far, so the guide knows more than the first few words.
+function fullGoal() {
+  return (state.goalFull || state.goal).slice(0, 290);
+}
+
+// Roadmap, best tool and prompt from one helper answer. A prompt also becomes the message at the builder's box.
+function takeReply(res) {
+  if (validRoadmap(res.plan)) setPlan(res.plan, 1);
+  if (res.tool !== undefined) setTool(res.tool);
+  if (typeof res.prompt === "string" && res.prompt.trim().length >= 30) {
+    const p = res.prompt.trim();
+    promptBubble(p);
+    state.msgText = p;
+    state.msgPromise = Promise.resolve(p);
+  }
+}
+
+// We need to know what you are making before we pick a tool or write a prompt.
+function waitForDetails() {
+  state.awaitingDetails = true;
+  state.running = false;
+  clearTimeout(state.timer);
+  showNow({
+    label: "First",
+    text: "Tell me a little more in the box below",
+    note: "Then I will pick the best tool for you and show you where to click.",
+  });
+  setStatus("");
+  ui.chatInput.focus();
+}
+
 function remember(role, text) {
   state.thread.push({ role, text });
   if (state.thread.length > 12) state.thread.shift();
@@ -323,6 +377,7 @@ async function sendChat() {
   if (state.chatBusy) return;
   state.chatBusy = true;
   const earlier = state.thread.slice(-10);
+  const wasAwaiting = state.awaitingDetails;
   ui.chatInput.value = "";
   autosizeChat();
   bubble("user", text);
@@ -332,7 +387,8 @@ async function sendChat() {
     const res = await ask(
       {
         message: text,
-        goal: state.goal,
+        goal: fullGoal(),
+        awaitingDetails: wasAwaiting || undefined,
         plan: planTitles(),
         thread: earlier,
         site: state.lastSite,
@@ -346,12 +402,14 @@ async function sendChat() {
     if (!res || typeof res.reply !== "string") throw new Error("I got mixed up. Please send that again.");
     bubble("ai", res.reply);
     remember("ai", res.reply);
-    if (typeof res.prompt === "string" && res.prompt.trim().length >= 30) promptBubble(res.prompt.trim());
-    if (validRoadmap(res.plan)) {
-      // Your message changed the path: show the new roadmap and carry on from its first stage.
-      setPlan(res.plan, 1);
-      if (state.goal) beginRun(0);
+    if (wasAwaiting && !res.needsDetails) {
+      // Your answer is the missing detail: keep it with the goal, so every step knows what you are making.
+      state.goalFull = `${state.goal}. ${text}`;
+      state.awaitingDetails = false;
     }
+    takeReply(res);
+    // Your message changed the path (or answered my questions): carry on from the first stage.
+    if (validRoadmap(res.plan) && state.goal && !res.needsDetails) beginRun(0);
   } catch (err) {
     typing.remove();
     bubble("ai", err.message || "Something went wrong. Please send that again.", "problem");
@@ -364,6 +422,9 @@ function resetChat() {
   state.msgText = "";
   state.msgPromise = null;
   state.thread = [];
+  state.goalFull = "";
+  state.awaitingDetails = false;
+  setTool(null);
   ui.thread.textContent = "";
   ui.thread.hidden = true;
   ui.chatInput.value = "";
@@ -503,6 +564,10 @@ async function readPage(tab) {
   }
 }
 
+function sigOf(e) {
+  return e ? String(e.label || e.text || "").trim().toLowerCase().slice(0, 60) : "";
+}
+
 async function look() {
   if (!state.running) return;
   if (state.busy) {
@@ -536,9 +601,17 @@ async function look() {
     state.lastElements = page.elements;
     // A step that failed on one page may be right on another, so forget failures when the page changes.
     if (state.failed.length && page.url && state.failedUrl && page.url !== state.failedUrl) state.failed = [];
+    // The page is the same one you pressed on: hide what you already pressed, so the AI cannot
+    // point at it a second time. A different page starts fresh.
+    if (page.url !== state.pressedUrl) state.pressed = [];
+    if ((afterClick || lost) && state.pressed.length) {
+      const left = page.elements.filter((e) => !state.pressed.includes(sigOf(e)));
+      if (left.length) page.elements = left;
+    }
     setStatus("Thinking…");
     const reply = await ask({
-      goal: state.goal,
+      goal: fullGoal(),
+      tool: state.tool ? state.tool.key : undefined,
       plan: planTitles(),
       didNotWork: state.failed.length ? state.failed.slice(-3) : undefined,
       lost,
@@ -604,7 +677,9 @@ async function look() {
       } catch (e) {
         pointed = false;
       }
+      state.pointedSig = pointed ? sigOf(page.elements.find((e) => e.id === reply.elementId)) : "";
     } else {
+      state.pointedSig = "";
       clearPointer();
     }
 
@@ -680,22 +755,26 @@ async function go() {
   resetChat();
   setStatus("");
   showNow({ text: "Planning your path", loading: true });
-  // For a website or app, start writing the message for the app builder right away, in the background.
-  if (APP_GOAL.test(goal)) startMessage();
-
   // First the whole path from zero to done. If that fails, we still guide you step by step.
   const runId = ++state.runId;
   try {
     const res = await ask({ message: goal, start: true, goal }, "/api/chat");
     if (runId !== state.runId) return; // you pressed Change meanwhile
-    if (res && validRoadmap(res.plan)) setPlan(res.plan, 1);
     if (res && typeof res.reply === "string" && res.reply) {
       bubble("ai", res.reply);
       remember("ai", res.reply);
     }
+    if (res) takeReply(res);
+    if (res && res.needsDetails) {
+      // Too little to go on: ask what you are making first. No tool and no prompt until you answer.
+      waitForDetails();
+      return;
+    }
   } catch (err) {
     if (runId !== state.runId) return;
   }
+  // No prompt came with the answer: for a website or app, write one in the background so it is ready.
+  if (!state.msgText && APP_GOAL.test(goal)) startMessage();
   beginRun(0);
 }
 
@@ -726,6 +805,15 @@ ui.goal.addEventListener("keydown", (e) => {
   }
 });
 ui.copyBtn.addEventListener("click", copyText);
+ui.toolOpen.addEventListener("click", () => {
+  if (state.tool) chrome.tabs.create({ url: state.tool.url });
+});
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    ui.goal.value = chip.dataset.goal || "";
+    ui.goal.focus();
+  });
+});
 ui.hear.addEventListener("click", speak);
 ui.lost.addEventListener("click", imLost);
 ui.roadHead.addEventListener("click", () => {
@@ -749,9 +837,15 @@ ui.chatInput.addEventListener("input", autosizeChat);
 // (The page itself waits until it stops changing before it is read, so these delays can be short.)
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.type !== "nc-event") return;
-  if (msg.kind === "user-acted") {
+  if (msg.kind === "user-acted" || msg.kind === "user-acted-other") {
     if (!state.running) return;
     state.afterClick = true; // tells the AI: they did the last step, give the NEXT one
+    if (msg.kind === "user-acted" && state.pointedSig) {
+      if (state.pressedUrl !== state.lastUrl) state.pressed = [];
+      state.pressedUrl = state.lastUrl;
+      if (!state.pressed.includes(state.pointedSig)) state.pressed.push(state.pointedSig);
+      state.pressed = state.pressed.slice(-3);
+    }
     // Answer the click at once: the old step is finished, the next one is on its way.
     showNow({ label: `Step ${state.steps}`, text: "Nice! Finding your next step", loading: true });
     setStatus("");

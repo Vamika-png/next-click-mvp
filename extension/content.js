@@ -12,6 +12,7 @@
   let raf = 0;
   let observer = null;
   let watchTimer = 0;
+  let typingTimer = 0;
   let goneNotified = false; // we already told the panel that the thing we pointed at is gone
   let changeCount = 0; // how many parts of the page were added or removed in the latest burst
   let contentNotified = false; // we already told the panel about a big change for this arrow
@@ -249,25 +250,45 @@
   // (scrolling around, reading) does not move the guide forward.
   // We listen for the moment the mouse goes DOWN, not only for the finished click, because menus
   // often close the instant you press, so a "click" never arrives. The Enter and Space keys count too.
-  function isPress(event) {
-    if (!target || !event) return false;
+  const INTERACTIVE = "a,button,summary,label,input,textarea,select,[role=button],[role=link],[role=menuitem],[role=tab],[role=option],[contenteditable]";
+
+  // "target": you pressed the thing we pointed at. "other": you pressed some other button or link
+  // (you took your own path), so the page will change anyway and we should look again too.
+  function pressKind(event) {
+    if (!target || !event) return "";
     const hit = event.target;
     if (event.type === "keydown") {
-      if (event.key !== "Enter" && event.key !== " ") return false;
+      if (event.key !== "Enter" && event.key !== " ") return "";
       const active = document.activeElement;
-      return !!active && (active === target || target.contains(active));
+      if (!active) return "";
+      if (active === target || target.contains(active)) return "target";
+      return event.key === "Enter" && !event.shiftKey && active.matches && active.matches(INTERACTIVE) ? "other" : "";
     }
-    if (event.type === "submit") return !!(hit && hit.contains && hit.contains(target));
-    if (!hit || hit.nodeType !== 1) return false;
+    if (event.type === "submit") return hit && hit.contains && hit.contains(target) ? "target" : "other";
+    if (!hit || hit.nodeType !== 1) return "";
     const clickable = hit.closest ? hit.closest("a,button,summary,label,[role=button],[role=link],[role=menuitem],[role=tab]") : null;
-    return target === hit || target.contains(hit) || (!!clickable && (clickable === target || clickable.contains(target)));
+    if (target === hit || target.contains(hit) || (!!clickable && (clickable === target || clickable.contains(target)))) return "target";
+    return hit.closest && hit.closest(INTERACTIVE) ? "other" : "";
   }
 
   function onUserAction(event) {
-    if (!isPress(event)) return;
+    const kind = pressKind(event);
+    if (!kind) return;
     clear(); // take the old arrow away at once, so it never points at something that is gone
-    // A short pause lets the page start reacting before the panel looks again.
-    setTimeout(() => notify("user-acted"), event.type === "pointerdown" ? 150 : 0);
+    // A very short pause lets the page start reacting before the panel looks again.
+    setTimeout(() => notify(kind === "target" ? "user-acted" : "user-acted-other"), event.type === "pointerdown" ? 80 : 0);
+  }
+
+  // Typing or pasting into the box we pointed at counts as doing the step: the next one is "send it".
+  // We only notice THAT something was typed, never what it says.
+  function onTyping(event) {
+    if (!target || !event.target || !(event.target === target || target.contains(event.target) || (event.target.contains && event.target.contains(target)))) return;
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      if (!target) return;
+      clear();
+      notify("user-acted");
+    }, 900);
   }
 
   const PRESS_EVENTS = ["pointerdown", "click", "submit", "keydown"];
@@ -303,7 +324,9 @@
     if (overlay) overlay.host.remove();
     overlay = null;
     target = null;
+    clearTimeout(typingTimer);
     PRESS_EVENTS.forEach((name) => document.removeEventListener(name, onUserAction, true));
+    document.removeEventListener("input", onTyping, true);
   }
 
   function point(id) {
@@ -317,13 +340,14 @@
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(place);
     PRESS_EVENTS.forEach((name) => document.addEventListener(name, onUserAction, true));
+    document.addEventListener("input", onTyping, true);
     watchTarget();
     return { ok: true };
   }
 
   // Pages often keep drawing for a moment after they "finish" loading. Instead of waiting a fixed
   // time, wait until the page has been still for a short while (never longer than maxMs).
-  function waitForQuiet(quietMs = 220, maxMs = 1500) {
+  function waitForQuiet(quietMs = 140, maxMs = 900) {
     return new Promise((resolve) => {
       let finished = false;
       let quietTimer = 0;

@@ -21,6 +21,10 @@ export const SITES = {
   gemini: { label: "Gemini", url: "https://gemini.google.com" },
   notion: { label: "Notion", url: "https://www.notion.so" },
   figma: { label: "Figma", url: "https://www.figma.com" },
+  shopify: { label: "Shopify", url: "https://www.shopify.com" },
+  wix: { label: "Wix", url: "https://www.wix.com" },
+  framer: { label: "Framer", url: "https://www.framer.com" },
+  replit: { label: "Replit", url: "https://replit.com" },
 } as const;
 
 export type SiteKey = keyof typeof SITES;

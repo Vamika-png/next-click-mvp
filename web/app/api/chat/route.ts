@@ -3,13 +3,20 @@ import { extractJson, fail, json, preflight, rateLimited } from "@/lib/http";
 import { AiError, askModel, pickProvider } from "@/lib/ai";
 import { loadGuides } from "@/lib/guides";
 import { describeElements, siteOf } from "@/lib/elements";
-import { SITE_KEYS } from "@/lib/sites";
+import { isSiteKey, SITE_KEYS, SITES } from "@/lib/sites";
 
 export const runtime = "nodejs";
 
 type PlanStep = { title: string; detail: string };
 type Plan = { title: string; steps: PlanStep[] };
-type Reply = { reply: string; plan: Plan | null; prompt: string | null };
+type Tool = { key: string; label: string; url: string; why: string };
+type Reply = {
+  reply: string;
+  plan: Plan | null;
+  prompt: string | null;
+  tool: Tool | null; // the best tool for this job, once we know what they want to make
+  needsDetails: boolean; // the goal is too vague: ask first, no tool and no prompt yet
+};
 
 export function OPTIONS() {
   return preflight();
@@ -25,15 +32,29 @@ You do two jobs.
 
 Example, for "build a website": 1. Write down your idea. 2. Make an account on an app builder (Lovable). 3. Paste your message and get a first version. 4. Improve it by chatting. 5. Save it on GitHub. 6. Put it on the internet with Vercel. 7. Get your own web address (optional).
 
-3) MESSAGE FOR THE ROBOT. The user can keep chatting back and forth and add details about what they want ("it is a sneaker brand", "make it dark", "add a shop page"). Whenever their message adds or changes what they want to make, also write "prompt": ONE complete, ready-to-paste message for an AI app builder (like Lovable) or chat AI (like Claude), built from the whole conversation, so they get the best result. Write it in first person ("Build me a website for..."), 60 to 180 words, with the idea, who it is for, the pages or parts, the look and feel, and what to do first. Do not invent facts they did not say; where something is missing, choose a sensible simple default. No passwords or keys. In "reply", explain in two or three simple sentences what this message is and where to paste it (for example: "I turned your idea into one message for the robot builder. Press Copy and paste it into the big box on Lovable. It will build your sneaker website."). If the message adds nothing about what they want to make (a plain question), use "prompt": null.
+3) BEST TOOL. Not every job belongs in the same tool. As soon as you know WHAT they want to make and WHO or WHAT IT IS FOR, pick the ONE best tool and return "tool": {"key":"<one of the site names>","why":"<max 14 words, simple>"}. Use these rules, and use your own knowledge when none fits:
+- Website or app with sign-in, saved data, bookings or several pages: lovable (bolt or replit if they want code they can edit right away).
+- Simple one-page site or landing page: v0 or framer (framer if design matters most).
+- An online shop that sells things (sneakers, clothes, food): shopify (wix for a very small, easy shop).
+- Portfolio, small business or blog site with no coding: wix or framer.
+- Writing, planning, research, learning, or coding help: claude (chatgpt or gemini are good too).
+- Posters, logos, social posts, slides, videos: canva.
+- Design mock-ups for a team: figma.
+- Budgets, trackers, lists with numbers: sheets. Documents and letters: docs. Notes and plans: notion.
+- Doing something automatically between apps: zapier (make if they want more control).
+The roadmap must use that tool (for example "Make an account on Shopify"). The tool names you can use are: ${SITE_KEYS.join(", ")}.
+
+4) QUESTIONS FIRST. If the goal is too vague to pick a tool or to write a good prompt (for example only "I want to build a website" or "make an app"), set "needsDetails": true, "tool": null, "prompt": null. Still give a short general roadmap (its first stage is "Choose the best tool"). In "reply", say one warm sentence, then ask at most 2 short questions as numbered lines, like "1. What kind of website is it? 2. Who is it for?". If the goal already says what it is and who it is for (for example "a website to sell sneakers to teenagers"), set "needsDetails": false and go straight to tool and prompt. If "awaitingDetails" is true, the user's message is their answer to your questions: combine it with the goal, set "needsDetails": false (ask once more only if the answer is still empty), return the full roadmap for the best tool, the "tool", and the "prompt".
+
+5) PROMPT. A "prompt" is the instructions the user pastes into an AI tool. Only write one when needsDetails is false and what they want to make is clear. Write ONE complete, ready-to-paste prompt for the chosen tool (an app builder like Lovable or Bolt, a chat AI like Claude, or Canva's AI box), built from the whole conversation. First person ("Build me a website for..."), 60 to 180 words: the idea, who it is for, the pages or parts, the look and feel, and what to do first. Do not invent facts they did not say; where something is missing, choose a sensible simple default. No passwords or keys. If their later message adds or changes details ("make it dark", "add a shop page"), write the improved prompt again. In "reply", explain in two or three simple sentences which tool to use and why, then what the prompt is and where to paste it (for example: "For selling sneakers, Shopify is best. I turned your idea into a prompt (the instructions you give an AI). Press Copy, then paste it where Shopify asks what store you want."). If the message adds nothing about what they want to make (a plain question), use "prompt": null.
 
 Answer with ONE JSON object and nothing else:
-{"reply":"<your answer, or one or two warm sentences introducing the roadmap>","plan":null OR {"title":"<max 6 words>","steps":[{"title":"<max 6 words>","detail":"<max 20 words>"}]},"prompt":null OR "<the ready-to-paste message>"}
+{"reply":"<your answer, or one or two warm sentences introducing the roadmap>","plan":null OR {"title":"<max 6 words>","steps":[{"title":"<max 6 words>","detail":"<max 20 words>"}]},"prompt":null OR "<the ready-to-paste prompt>","tool":null OR {"key":"<site name>","why":"<max 14 words>"},"needsDetails":true OR false}
 
 Rules:
-- If "start" is true you MUST return a roadmap for the goal. Otherwise return "plan": null unless the message really changes the path or asks for the roadmap again.
+- If "start" is true you MUST return a roadmap for the goal. If "awaitingDetails" is true you MUST also return a roadmap. Otherwise return "plan": null unless the message really changes the path (including a different tool) or asks for the roadmap again.
 - When you return a roadmap, the reply is one or two warm sentences, for example "Here is your path from zero to a live website. I will walk you through each step, one at a time."
-- Never use these words: repository, repo, deploy, prompt, API, environment, framework, commit, authenticate, OAuth, terminal. Use simple words ("saving place", "put it on the internet", "message for the robot"). If a hard word is unavoidable, explain it in a few words in brackets.
+- You may say "prompt" (explain it once as "the instructions you give an AI"). Never use these words: repository, repo, deploy, API, environment, framework, commit, authenticate, OAuth, terminal. Use simple words ("saving place", "put it on the internet", "message for the robot"). If a hard word is unavoidable, explain it in a few words in brackets.
 - NEVER ask for a password, API key or token. Never repeat any secret you see. Do not write web addresses.
 - You can only see websites in Chrome. If they ask about a desktop app, say so plainly and suggest the website version.`;
 
@@ -63,9 +84,16 @@ function parseReply(text: string): Reply | null {
   if (!raw) return null;
   const reply = cleanMultiline(raw.reply, 900);
   const plan = parsePlan(raw.plan);
-  const prompt = cleanMultiline(raw.prompt, 1600);
+  const needsDetails = raw.needsDetails === true;
+  let prompt: string | null = cleanMultiline(raw.prompt, 1600);
+  if (prompt.length < 30 || needsDetails) prompt = null; // no prompt until we know what they want
+  let tool: Tool | null = null;
+  const t = raw.tool && typeof raw.tool === "object" ? (raw.tool as Record<string, unknown>) : null;
+  if (t && isSiteKey(t.key) && !needsDetails) {
+    tool = { key: t.key, label: SITES[t.key].label, url: SITES[t.key].url, why: sanitizeText(t.why, 120) };
+  }
   if (!reply && !plan && !prompt) return null;
-  return { reply: reply || "Here is your path.", plan, prompt: prompt.length >= 30 ? prompt : null };
+  return { reply: reply || "Here is your path.", plan, prompt, tool, needsDetails };
 }
 
 // Test mode (MOCK_AI=1): fixed answers so the panel can be tried without an AI key.
@@ -74,6 +102,8 @@ function mockReply(message: string, start: boolean): Reply {
     return {
       reply: "(test mode) Here is a sample path from zero to done. I will walk you through each step.",
       prompt: null,
+      tool: null,
+      needsDetails: true,
       plan: {
         title: "Your path",
         steps: [
@@ -86,7 +116,7 @@ function mockReply(message: string, start: boolean): Reply {
       },
     };
   }
-  return { reply: `(test mode) You asked: "${message.slice(0, 120)}". The real AI will answer this in simple words.`, plan: null, prompt: /sneaker|shop|brand|website/i.test(message) ? "Build me a simple website for my idea. (test mode sample message)" : null };
+  return { reply: `(test mode) You asked: "${message.slice(0, 120)}". The real AI will answer this in simple words.`, plan: null, tool: null, needsDetails: false, prompt: /sneaker|shop|brand|website/i.test(message) ? "Build me a simple website for my idea. (test mode sample message)" : null };
 }
 
 // Remember roadmaps for the same goal for a while, so a repeat is instant and uses no quota.
@@ -112,6 +142,7 @@ export async function POST(req: Request) {
   }
 
   const start = body.start === true;
+  const awaitingDetails = body.awaitingDetails === true; // this message answers our questions
   const goal = sanitizeText(body.goal, 300) || (start ? message : "");
   const site = siteOf(body.site);
   const title = sanitizeText(body.title, 150);
@@ -152,6 +183,7 @@ export async function POST(req: Request) {
       user: JSON.stringify({
         message,
         start,
+        awaitingDetails: awaitingDetails || undefined,
         goal: goal || undefined,
         currentRoadmap: currentPlan.length ? currentPlan.map((t, i) => `${i + 1}. ${t}`) : undefined,
         stepOnScreenNow: currentStep || undefined,
@@ -159,11 +191,11 @@ export async function POST(req: Request) {
         page: site ? { site, title, elements: describeElements(elements) } : undefined,
       }),
       maxTokens: 1400,
-      strong: start, // the roadmap is the most important answer, so the stronger model goes first
+      strong: start || awaitingDetails, // the roadmap is the most important answer, so the stronger model goes first
     });
     const parsed = parseReply(text);
     console.log(`[chat] ${provider} ${Date.now() - started}ms start=${start} ok=${!!parsed} plan=${parsed?.plan ? parsed.plan.steps.length + " steps" : "no"}`);
-    if (!parsed || (start && !parsed.plan)) {
+    if (!parsed || ((start || awaitingDetails) && !parsed.plan)) {
       return fail("bad_ai_reply", "I got confused. Please send that again.", 502);
     }
     if (start && parsed.plan) plans.set(planKey, { at: Date.now(), reply: parsed });

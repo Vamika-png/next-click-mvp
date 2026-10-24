@@ -19,6 +19,12 @@
     <label for="goal">What do you want to do?</label>
     <p class="hint">Tell me in your own words. I'll show you the whole path, then the next button to press.</p>
     <textarea id="goal" rows="3" placeholder="A website for my shop, a poster in Canva, a budget in Google Sheets…"></textarea>
+    <div class="chips" aria-label="Ideas">
+      <button type="button" class="chip" data-goal="I want to build a website">Build a website</button>
+      <button type="button" class="chip" data-goal="I want to make a poster">Make a poster</button>
+      <button type="button" class="chip" data-goal="I want to make a budget sheet">Make a budget</button>
+      <button type="button" class="chip" data-goal="I want to automate something">Automate a task</button>
+    </div>
     <button id="go" class="big primary">Go</button>
   </section>
 
@@ -26,6 +32,17 @@
     <span class="goal-chip"><span class="goal-k">Your goal</span><strong id="goalText"></strong></span>
     <button id="change" class="link">Change</button>
   </p>
+
+  <!-- The best tool for this job (shown once we know what you are making) -->
+  <section id="toolCard" class="toolcard" hidden>
+    <span id="toolBadge" class="tool-badge" aria-hidden="true"></span>
+    <div class="tool-body">
+      <p class="tool-k">Best tool for this</p>
+      <p id="toolName" class="tool-name"></p>
+      <p id="toolWhy" class="tool-why"></p>
+    </div>
+    <button id="toolOpen" class="pill" type="button">Open</button>
+  </section>
 
   <!-- 2. The whole path, from zero to done -->
   <section id="roadmap" class="roadmap" hidden>

@@ -119,6 +119,27 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(255, 92, 
 .goal-k { flex: none; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .goal-chip strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 
+/* ---------- idea chips and the best-tool card ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chip {
+  padding: 7px 13px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--ink);
+  background: var(--surface); border: 1.5px solid var(--line); transition: border-color .12s, color .12s, background .12s, transform .12s;
+}
+.chip:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+.toolcard {
+  display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 12px 14px; border-radius: 20px;
+  background: var(--accent-soft); border: 1px solid #ffd2c2; animation: rise .28s ease-out;
+}
+.tool-badge {
+  flex: none; width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center;
+  font-size: 19px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--accent-2), var(--accent)); box-shadow: var(--glow);
+}
+.tool-body { flex: 1; min-width: 0; }
+.tool-k { margin: 0; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.tool-name { margin: 1px 0 0; font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
+.tool-why { margin: 1px 0 0; font-size: 13px; line-height: 1.35; color: var(--muted); }
+.toolcard .pill { flex: none; color: #fff; background: linear-gradient(135deg, var(--accent-2), var(--accent)); }
+
 /* ---------- steps you already did ---------- */
 .done-list { list-style: none; margin: 0 0 12px; padding: 0 4px; display: grid; gap: 5px; }
 .done-list li {

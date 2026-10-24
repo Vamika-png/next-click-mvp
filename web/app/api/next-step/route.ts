@@ -52,11 +52,13 @@ How to talk (most important):
 Opening websites:
 - If the user is not on the right website for the next step (or the page list is empty because it can't be read), and the right website is one of these names: ${SITE_KEYS.join(", ")}, set "open" to that name and elementId to null, and say in the instruction which site you are opening and why, in one simple sentence. The panel shows an Open button; never write web addresses (like "lovable.dev") in your sentences, only the plain name of the site (like "Lovable").
 - If the right website is not in that list, set "open" to null and say its name in the instruction so they can open it themselves.
-- Pick the app builder like this: "lovable" for apps with sign-in, saved data, bookings, orders or several pages (the default); "v0" for a simple one-page site; "bolt" only if the others clearly don't fit. Keep the same builder for the whole job.
+- If "chosenTool" is given, that is the tool the user was told to use. Use it for the whole job, open it first if the user is not on it, and follow its own sign-up and start screens. Do not switch to another tool.
+- Follow-ups must always move forward. After the user presses a text box, the NEXT step is to paste or type, never the same box again. After they paste or type, the NEXT step is the send, create or continue button. After a menu opens, point at the item inside it. After a sign-up form, point at the next field or button. If the page truly did not change, point at a DIFFERENT element, never the one they just pressed.
+- If "chosenTool" is not given, pick the app builder like this: "lovable" for apps with sign-in, saved data, bookings, orders or several pages (the default); "v0" for a simple one-page site; "bolt" only if the others clearly don't fit. Keep the same builder for the whole job.
 
 Text the user must paste:
 - Set copyText only when the user must paste something SHORT and specific (a spreadsheet formula, a setting, a few words). Always tell them the order in one short sentence: first press Copy (in the panel), then click the place, then paste.
-- The long ready-made message for an AI app builder is NOT written by you: the panel writes it separately. When the goal is making a website or app and the user is at the builder's big message box without having sent a message yet, set "needsMessage" to true, leave copyText null, point at the box, and say the order in one short sentence: first press Copy (in the panel), then click the big box, then paste, then press the send arrow. In every other case "needsMessage" is false.
+- The long ready-made message for an AI app builder is NOT written by you: the panel writes it separately. When the user is at the big message box of an AI tool (an app builder, Claude, ChatGPT, Canva's AI box) to describe what they want made, and has not sent it yet, set "needsMessage" to true, leave copyText null, point at the box, and say the order in one short sentence: first press Copy (in the panel), then click the big box, then paste, then press the send arrow. In every other case "needsMessage" is false.
 - Otherwise copyText is null.
 
 Beginners and desktop apps:
@@ -161,6 +163,7 @@ export async function POST(req: Request) {
   const site = siteOf(body.site);
   const title = sanitizeText(body.title, 150);
   const lost = body.lost === true;
+  const chosenTool = isSiteKey(body.tool) ? SITES[body.tool].label : "";
   const afterClick = body.afterClick === true; // the user just pressed what we pointed at
   const history = Array.isArray(body.history)
     ? body.history.slice(-3).map((h) => sanitizeText(h, 200)).filter(Boolean)
@@ -200,7 +203,7 @@ export async function POST(req: Request) {
   }
 
   const lines = describeElements(elements);
-  const key = cacheKey([goal, site, title, afterClick ? "after-click" : "first-look", roadmap.join("|"), history.join("|"), didNotWork.join("|"), ...lines]);
+  const key = cacheKey([goal, site, title, afterClick ? "after-click" : "first-look", chosenTool, roadmap.join("|"), history.join("|"), didNotWork.join("|"), ...lines]);
   const hit = lost ? undefined : answers.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) {
     console.log(`[next-step] remembered answer site=${site || "(unreadable)"} -> "${hit.reply.instruction.slice(0, 100)}"`);
@@ -214,6 +217,7 @@ export async function POST(req: Request) {
       system: `${RULES}\n\n--- GUIDES ---\n${guides.text}`,
       user: JSON.stringify({
         goal,
+        chosenTool: chosenTool || undefined,
         roadmap: roadmap.length ? roadmap.map((t, i) => `${i + 1}. ${t}`) : undefined,
         didNotWork: didNotWork.length ? didNotWork : undefined,
         lost,
